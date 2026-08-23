@@ -48,12 +48,14 @@ const TARGET_MODES = ["FIRST", "NEAR", "STRONG"];
 interface Tower {
   id: number; kind: TowerKind; def: TowerDef;
   group: THREE.Group; turret: THREE.Group; barrel: THREE.Group; muzzle: THREE.Object3D;
+  elevNode: THREE.Object3D;
   breech: THREE.Mesh | null; loader: THREE.Object3D | null; hitMesh: THREE.Mesh;
   pos: THREE.Vector3; hp: number; maxHp: number; ammo: number; maxAmmo: number;
   cooldown: number; reloadT: number; reloadMax: number; aiT: number;
   tier: number; dmgMul: number; penMul: number; rofMul: number; rangeMul: number;
   splashMul: number; travMul: number; airPriority: boolean;
   targetMode: number; target: Enemy | null; recoil: number; flashT: number;
+  elev: number;
   dead: boolean; invested: number; hpBar: THREE.Group | null;
 }
 interface Enemy {
@@ -755,12 +757,14 @@ export class Engine {
   // ── towers ────────────────────────────────────────────────────────────────
   private buildTowerVisual(kind: TowerKind): {
     group: THREE.Group; turret: THREE.Group; barrel: THREE.Group; muzzle: THREE.Object3D;
+    elevNode: THREE.Object3D;
     breech: THREE.Mesh | null; loader: THREE.Object3D | null;
   } {
     const group = new THREE.Group();
     const turret = new THREE.Group();
     const barrel = new THREE.Group();
     const muzzle = new THREE.Object3D();
+    let elevNode: THREE.Object3D = barrel;
     let breech: THREE.Mesh | null = null;
     let loader: THREE.Object3D | null = null;
 
@@ -843,6 +847,7 @@ export class Engine {
       barrel.add(shield);
       pivot.add(barrel);
       turret.add(pivot);
+      elevNode = pivot;
       group.add(turret, soldier(1.3, -0.8), soldier(-1.3, -0.8), soldier(0, -1.5));
       loader = group.children[group.children.length - 2] as THREE.Object3D;
     } else if (kind === "hedgehog") {
@@ -885,7 +890,7 @@ export class Engine {
     group.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) { o.castShadow = true; }
     });
-    return { group, turret, barrel, muzzle, breech, loader };
+    return { group, turret, barrel, muzzle, elevNode, breech, loader };
   }
 
   private makeGhost(kind: TowerKind): THREE.Group {
@@ -916,7 +921,8 @@ export class Engine {
 
   canPlaceAt(x: number, z: number, kind: TowerKind): boolean {
     if (Math.abs(x) > 76 || Math.abs(z) > 52) return false;
-    const roadMin = kind === "hedgehog" || kind === "wire" || kind === "mines" ? 3.9 : 7.5;
+    // defensive structures may be laid directly ON the road; guns need clear ground
+    const roadMin = TOWER_DEFS[kind].structure ? 0 : 7.5;
     if (this.distToPath(x, z) < roadMin) return false;
     if (Math.hypot(x - 66, z - 22) < 9) return false;
     const minSep = kind === "hedgehog" || kind === "wire" || kind === "mines" ? 3.6 : 5;
@@ -935,7 +941,8 @@ export class Engine {
     const v = this.buildTowerVisual(kind);
     const y = this.heightAt(x, z);
     v.group.position.set(x, y, z);
-    v.group.rotation.y = Math.atan2(66 - x, 22 - z);
+    // group stays axis-aligned: turret yaw is world-space (360° traverse)
+    v.turret.rotation.y = Math.atan2(66 - x, 22 - z);
     this.dyn.add(v.group);
     const hitGeo = new THREE.CylinderGeometry(2.1, 2.1, 3.4, 8);
     const hitMesh = new THREE.Mesh(hitGeo, new THREE.MeshBasicMaterial({ visible: false }));
@@ -943,13 +950,14 @@ export class Engine {
     this.dyn.add(hitMesh);
     const t: Tower = {
       id: this.nextId++, kind, def,
-      group: v.group, turret: v.turret, barrel: v.barrel, muzzle: v.muzzle,
+      group: v.group, turret: v.turret, barrel: v.barrel, muzzle: v.muzzle, elevNode: v.elevNode,
       breech: v.breech, loader: v.loader, hitMesh,
       pos: new THREE.Vector3(x, y, z),
       hp: def.hp, maxHp: def.hp, ammo: def.ammo, maxAmmo: def.ammo,
       cooldown: 0, reloadT: 0, reloadMax: def.rof > 0 ? 1 / def.rof : 0, aiT: Math.random() * 0.12,
       tier: 0, dmgMul: 1, penMul: 1, rofMul: 1, rangeMul: 1, splashMul: 1, travMul: 1, airPriority: false,
-      targetMode: 0, target: null, recoil: 0, flashT: 0, dead: false, invested: def.cost, hpBar: null,
+      targetMode: 0, target: null, recoil: 0, flashT: 0, elev: kind === "flak" ? 0.55 : 0,
+      dead: false, invested: def.cost, hpBar: null,
     };
     this.towers.push(t);
     sfx.play("build");
@@ -1092,10 +1100,12 @@ export class Engine {
     const muzzlePos = new THREE.Vector3();
     t.muzzle.getWorldPosition(muzzlePos);
     const def = t.def;
-    const dir = aimPoint.clone().add(new THREE.Vector3(0, def.lob, 0)).sub(muzzlePos);
-    const dist = dir.length();
-    dir.normalize();
-    const speed = def.projSpeed;
+    // exact ballistic solution: compensate gravity so the round arrives on the predicted point
+    const to = aimPoint.clone().sub(muzzlePos);
+    const g = def.kind === "mg" ? GRAV * 0.35 : GRAV;
+    const tFlight = Math.max(0.08, (to.length() / def.projSpeed) * (1 + def.lob * 0.02));
+    const vel = to.divideScalar(tFlight);
+    vel.y += 0.5 * g * tFlight;
     let mesh: THREE.Mesh;
     let kind: Proj["kind"] = "shell";
     if (def.kind === "mg") {
@@ -1117,12 +1127,11 @@ export class Engine {
     }
     mesh.position.copy(muzzlePos);
     this.dyn.add(mesh);
-    const spread = def.kind === "mg" ? 1.1 : def.kind === "flak" ? 0.6 : 0.35;
-    dir.x += rand(-spread, spread) / Math.max(10, dist) * 6;
-    dir.z += rand(-spread, spread) / Math.max(10, dist) * 6;
-    dir.normalize();
+    const spread = def.kind === "mg" ? 2.6 : def.kind === "flak" ? 1.9 : 1.0;
+    vel.x += rand(-spread, spread);
+    vel.z += rand(-spread, spread);
     const p: Proj = {
-      mesh, pos: muzzlePos.clone(), vel: dir.multiplyScalar(speed),
+      mesh, pos: muzzlePos.clone(), vel,
       dmg: def.dmg * t.dmgMul * (manual ? 1.35 : 1), pen: def.pen * t.penMul,
       splash: def.splash * (def.kind === "flak" ? t.splashMul : 1),
       splashDmg: def.splashDmg * (def.kind === "flak" ? t.splashMul : 1) * (manual ? 1.35 : 1),
@@ -1267,6 +1276,13 @@ export class Engine {
     aim.y = this.heightAt(point.x, point.z) + 0.5;
     const want = Math.atan2(aim.x - t.pos.x, aim.z - t.pos.z);
     t.turret.rotation.y = want;
+    const muzzleY = t.pos.y + (t.kind === "flak" ? 1.1 : t.kind === "at" ? 1.37 : 1.28);
+    const hd = Math.hypot(aim.x - t.pos.x, aim.z - t.pos.z);
+    const rawE = Math.atan2(aim.y - muzzleY, Math.max(1, hd));
+    const maxE = t.kind === "flak" ? 1.3 : 0.5;
+    const minE = t.kind === "flak" ? -0.1 : -0.28;
+    t.elev = clamp(rawE, minE, maxE);
+    t.elevNode.rotation.x = -t.elev;
     this.fireTower(t, aim, true);
     this.spawnRingPulse(point, 0xf2b23e);
   }
@@ -1873,17 +1889,29 @@ export class Engine {
         t.target = best;
       }
 
+      // barrel elevation (idle: MG/AT level, Flak scans skyward)
+      let elevDes = t.kind === "flak" ? 0.42 : 0.04;
+      let pitchOk = true;
       if (t.target && !t.target.dead) {
         const aim = this.aimPrediction(t, t.target);
         const want = Math.atan2(aim.x - t.pos.x, aim.z - t.pos.z);
         const rate = t.def.traverse * t.travMul * dt;
         const cur = t.turret.rotation.y;
         t.turret.rotation.y = angLerp(cur, want, rate / Math.max(0.001, Math.abs(angDiff(cur, want))));
+        const muzzleY = t.pos.y + (t.kind === "flak" ? 1.1 : t.kind === "at" ? 1.37 : 1.28);
+        const hd = Math.hypot(aim.x - t.pos.x, aim.z - t.pos.z);
+        const rawE = Math.atan2(aim.y - muzzleY, Math.max(1, hd));
+        const maxE = t.kind === "flak" ? 1.3 : 0.5;
+        const minE = t.kind === "flak" ? -0.1 : -0.28;
+        elevDes = clamp(rawE, minE, maxE);
+        pitchOk = Math.abs(t.elev - elevDes) < 0.22;
         const aligned = Math.abs(angDiff(t.turret.rotation.y, want)) < 0.14;
-        if (aligned && t.cooldown <= 0 && t.ammo > 0) {
+        if (aligned && pitchOk && t.cooldown <= 0 && t.ammo > 0) {
           this.fireTower(t, aim, false);
         }
       }
+      t.elev = lerp(t.elev, elevDes, Math.min(1, dt * (t.kind === "mg" ? 6 : 3.4)));
+      t.elevNode.rotation.x = -t.elev;
     }
     // selected ring follows
     if (this.selected && !this.selected.dead) {
@@ -1898,6 +1926,7 @@ export class Engine {
       const p = this.projs[i];
       p.life -= dt;
       p.vel.y -= GRAV * dt * (p.kind === "tracer" ? 0.35 : 1);
+      const prev = p.pos.clone();
       p.pos.addScaledVector(p.vel, dt);
       p.mesh.position.copy(p.pos);
       if (p.kind !== "bomb") {
@@ -1921,11 +1950,17 @@ export class Engine {
         hit = true;
       }
 
+      // segment sweep this frame (no tunneling at high shell velocity)
+      const seg = p.pos.clone().sub(prev);
+      const segLen2 = seg.lengthSq();
+
       // flying proximity fuse for flak
       if (!hit && p.kind === "flak") {
         for (const e of this.enemies) {
           if (e.dead || !e.flying) continue;
-          if (e.pos.distanceTo(p.pos) < 3.2) {
+          const tt = segLen2 > 1e-6 ? clamp(e.pos.clone().sub(prev).dot(seg) / segLen2, 0, 1) : 1;
+          const closest = prev.clone().addScaledVector(seg, tt);
+          if (closest.distanceTo(e.pos) < 3.8) {
             this.explode(p.pos, p.splash + 1.5, p.splashDmg, { big: false });
             this.damageEnemy(e, p.dmg, p.pen, e.pos, p.vel);
             hit = true;
@@ -1938,8 +1973,10 @@ export class Engine {
       if (!hit) {
         for (const e of this.enemies) {
           if (e.dead || e.falling) continue;
-          const r = e.def.radius + (p.kind === "tracer" ? 0.45 : 0.75);
-          if (Math.abs(e.pos.y - p.pos.y) < r + 1 && e.pos.distanceTo(p.pos) < r) {
+          const r = e.def.radius + (p.kind === "tracer" ? 0.55 : 0.85);
+          const tt = segLen2 > 1e-6 ? clamp(e.pos.clone().sub(prev).dot(seg) / segLen2, 0, 1) : 1;
+          const closest = prev.clone().addScaledVector(seg, tt);
+          if (Math.abs(e.pos.y - closest.y) < r + 1.2 && closest.distanceTo(e.pos) < r) {
             if (p.splash > 0) this.explode(p.pos, p.splash, p.splashDmg, {});
             this.damageEnemy(e, p.dmg, p.pen, p.pos, p.vel);
             hit = true;

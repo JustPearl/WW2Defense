@@ -313,6 +313,9 @@ export default function App() {
                   <div className={`mx-auto ${armed ? "text-[var(--amber-hi)]" : "text-[var(--line-hi)]"}`}>{ICONS[k]}</div>
                   <div className="mt-1 text-[9px] font-bold tracking-wider text-[var(--paper)]">{d.short}</div>
                   <div className={`hud-num text-[10px] font-bold ${broke ? "text-[var(--red-hi)]" : "text-[var(--amber)]"}`}>{d.cost}</div>
+                  <div className={`text-[7px] font-bold tracking-widest ${d.structure ? "text-[var(--olive)]" : "text-[var(--dim)]"}`}>
+                    {d.structure ? "LAY ON ROAD" : "OFF-ROAD"}
+                  </div>
                 </div>
               );
             })}
