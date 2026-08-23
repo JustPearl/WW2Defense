@@ -345,16 +345,9 @@ export class Engine {
     this.spawnAmbientWreck(24, 30);
   }
 
-  heightAt(x: number, z: number): number {
-    const n =
-      Math.sin(x * 0.05) * Math.cos(z * 0.062) * 1.7 +
-      Math.sin(x * 0.128 + 2.1) * Math.sin(z * 0.107 + 0.8) * 0.65 +
-      Math.cos(x * 0.024 - z * 0.033 + 1.2) * 1.25;
-    const d = this.distToPath(x, z);
-    let h = n * (0.16 + 0.84 * sstep(5, 16, d));
-    const dh = Math.hypot(x - 66, z - 22);
-    h *= sstep(7, 18, dh);
-    return clamp(h, -2.2, 5.2);
+  heightAt(_x: number, _z: number): number {
+    // perfectly flat battlefield — clean sightlines, honest ballistics
+    return 0;
   }
 
   distToPath(x: number, z: number): number {
@@ -392,8 +385,7 @@ export class Engine {
     while (spots.length < 130 && tries < 900) {
       tries++;
       const x = rand(-84, 84), z = rand(-58, 58);
-      const h = this.heightAt(x, z);
-      if (h < 1.1 || this.distToPath(x, z) < 11 || Math.hypot(x - 66, z - 22) < 16) continue;
+      if (this.distToPath(x, z) < 11 || Math.hypot(x - 66, z - 22) < 16) continue;
       spots.push({ x, z, s: rand(0.8, 1.9) });
     }
     const trunks = new THREE.InstancedMesh(trunkGeo, trunkMat, spots.length);
@@ -1938,18 +1930,6 @@ export class Engine {
       }
       let hit = false;
 
-      // terrain
-      const th = this.heightAt(p.pos.x, p.pos.z);
-      if (p.pos.y <= th + 0.15) {
-        p.pos.y = th + 0.15;
-        if (p.kind === "tracer") {
-          this.spawnSmoke(p.pos.clone(), new THREE.Vector3(0, 1.2, 0), 0.5, 0.5, 0.6, 1.4);
-        } else {
-          this.explode(p.pos, p.splash, p.splashDmg, { big: p.kind === "arty" || p.kind === "bomb", hurtsTowers: p.kind === "bomb", crater: 1 });
-        }
-        hit = true;
-      }
-
       // segment sweep this frame (no tunneling at high shell velocity)
       const seg = p.pos.clone().sub(prev);
       const segLen2 = seg.lengthSq();
@@ -1982,6 +1962,20 @@ export class Engine {
             hit = true;
             break;
           }
+        }
+      }
+
+      // terrain (checked after enemies so flat-trajectory rounds reach their target)
+      if (!hit) {
+        const th = this.heightAt(p.pos.x, p.pos.z);
+        if (p.pos.y <= th + 0.15) {
+          p.pos.y = th + 0.15;
+          if (p.kind === "tracer") {
+            this.spawnSmoke(p.pos.clone(), new THREE.Vector3(0, 1.2, 0), 0.5, 0.5, 0.6, 1.4);
+          } else {
+            this.explode(p.pos, p.splash, p.splashDmg, { big: p.kind === "arty" || p.kind === "bomb", hurtsTowers: p.kind === "bomb", crater: 1 });
+          }
+          hit = true;
         }
       }
 
