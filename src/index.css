@@ -1,1 +1,143 @@
 @import "tailwindcss";
+
+:root {
+  --ink: #0d100a;
+  --panel: #161b0f;
+  --panel2: #1d2413;
+  --line: #55613a;
+  --line-hi: #8a9a5b;
+  --amber: #f2b23e;
+  --amber-hi: #ffd479;
+  --paper: #e9e4cf;
+  --dim: #9aa08a;
+  --red: #e5484d;
+  --red-hi: #ff6b6b;
+  --olive: #a4c94e;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+
+body {
+  font-family: "IBM Plex Mono", monospace;
+  background: var(--ink);
+  color: var(--paper);
+  -webkit-font-smoothing: antialiased;
+}
+
+.font-display { font-family: "Black Ops One", "IBM Plex Mono", monospace; font-weight: 400; }
+
+/* ---------- HUD chrome ---------- */
+.panel {
+  background: linear-gradient(180deg, rgba(32, 40, 20, 0.94), rgba(19, 24, 12, 0.94));
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 18px rgba(0, 0, 0, 0.55);
+  clip-path: polygon(0 0, calc(100% - 12px) 0, 100% 12px, 100% 100%, 12px 100%, 0 calc(100% - 12px));
+}
+.panel-flat {
+  background: linear-gradient(180deg, rgba(32, 40, 20, 0.94), rgba(19, 24, 12, 0.94));
+  border: 1px solid var(--line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 4px 18px rgba(0, 0, 0, 0.55);
+}
+.stencil-head {
+  font-family: "Black Ops One", monospace;
+  letter-spacing: 0.14em;
+  color: var(--amber);
+  text-transform: uppercase;
+}
+.hud-num { font-variant-numeric: tabular-nums; }
+
+.btn {
+  font-family: "IBM Plex Mono", monospace;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--amber);
+  background: linear-gradient(180deg, #2a331a, #1b2210);
+  border: 1px solid var(--line-hi);
+  padding: 8px 18px;
+  cursor: pointer;
+  transition: transform 80ms ease, box-shadow 120ms ease, background 120ms ease, color 120ms;
+  clip-path: polygon(0 0, calc(100% - 10px) 0, 100% 10px, 100% 100%, 10px 100%, 0 calc(100% - 10px));
+  user-select: none;
+}
+.btn:hover { background: linear-gradient(180deg, #3a4723, #232c13); color: var(--amber-hi); box-shadow: 0 0 14px rgba(242, 178, 62, 0.35); }
+.btn:active { transform: translateY(2px) scale(0.98); }
+.btn:disabled { opacity: 0.38; cursor: not-allowed; box-shadow: none; }
+.btn-danger { color: var(--red-hi); border-color: #8a3a3c; background: linear-gradient(180deg, #3a1d18, #241009); }
+.btn-danger:hover { box-shadow: 0 0 14px rgba(229, 72, 77, 0.4); color: #ff9a9d; }
+.btn-big {
+  font-family: "Black Ops One", monospace;
+  font-size: 20px;
+  letter-spacing: 0.18em;
+  padding: 16px 44px;
+}
+
+/* build cards */
+.card {
+  position: relative;
+  width: 92px;
+  padding: 6px 4px 7px;
+  text-align: center;
+  cursor: pointer;
+  background: linear-gradient(180deg, rgba(36, 44, 22, 0.95), rgba(20, 26, 12, 0.95));
+  border: 1px solid var(--line);
+  transition: transform 100ms ease, border-color 120ms, box-shadow 120ms;
+  clip-path: polygon(0 0, calc(100% - 9px) 0, 100% 9px, 100% 100%, 9px 100%, 0 calc(100% - 9px));
+  user-select: none;
+}
+.card:hover { transform: translateY(-4px); border-color: var(--line-hi); }
+.card.armed { border-color: var(--amber); box-shadow: 0 0 16px rgba(242, 178, 62, 0.45), inset 0 0 12px rgba(242, 178, 62, 0.12); }
+.card.broke { opacity: 0.42; }
+.card .key {
+  position: absolute; top: 2px; left: 4px; font-size: 9px; color: var(--dim); font-weight: 700;
+}
+
+/* bars */
+.bar { position: relative; height: 10px; background: #0a0d07; border: 1px solid #39422a; overflow: hidden; }
+.bar > i {
+  display: block; height: 100%;
+  background: repeating-linear-gradient(45deg, var(--olive) 0 6px, #8fb53e 6px 12px);
+  transition: width 200ms ease;
+}
+.bar.amber > i { background: repeating-linear-gradient(45deg, var(--amber) 0 6px, #d99a2b 6px 12px); }
+.bar.red > i { background: repeating-linear-gradient(45deg, var(--red) 0 6px, #b83338 6px 12px); }
+
+/* fx overlays */
+.scanlines {
+  pointer-events: none;
+  background: repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.14) 0 1px, transparent 1px 3px);
+  mix-blend-mode: multiply;
+}
+.vignette {
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, transparent 52%, rgba(5, 7, 3, 0.66) 100%);
+}
+@keyframes boomflash { 0% { opacity: 0.85; } 100% { opacity: 0; } }
+.boom-flash { animation: boomflash 500ms ease-out forwards; background: radial-gradient(circle, rgba(255, 220, 150, 0.9), rgba(255, 140, 40, 0.35) 55%, transparent 75%); }
+@keyframes dmgflash { 0% { opacity: 0.6; } 100% { opacity: 0; } }
+.dmg-flash { animation: dmgflash 600ms ease-out forwards; background: radial-gradient(ellipse at center, transparent 40%, rgba(200, 20, 20, 0.55) 100%); }
+
+@keyframes bannerin {
+  0% { transform: translateY(-26px) scaleY(0.6); opacity: 0; }
+  12% { transform: translateY(0) scaleY(1); opacity: 1; }
+  82% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.banner-anim { animation: bannerin 3200ms cubic-bezier(0.2, 0.9, 0.25, 1) forwards; }
+
+@keyframes toastin { 0% { transform: translateY(10px); opacity: 0; } 10% { transform: none; opacity: 1; } 80% { opacity: 1; } 100% { opacity: 0; } }
+.toast-anim { animation: toastin 2200ms ease forwards; }
+
+@keyframes pulsewarn { 0%, 100% { color: var(--red-hi); } 50% { color: var(--amber-hi); } }
+.pulse-warn { animation: pulsewarn 900ms infinite; }
+
+@keyframes titleglow { 0%,100% { text-shadow: 0 0 24px rgba(242,178,62,.25), 0 4px 0 #000; } 50% { text-shadow: 0 0 44px rgba(242,178,62,.5), 0 4px 0 #000; } }
+.title-glow { animation: titleglow 3s ease-in-out infinite; }
+
+.cursor-build { cursor: crosshair !important; }
+
+::-webkit-scrollbar { width: 8px; }
+::-webkit-scrollbar-track { background: #10140a; }
+::-webkit-scrollbar-thumb { background: var(--line); }
