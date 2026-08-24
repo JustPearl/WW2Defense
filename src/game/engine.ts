@@ -867,6 +867,7 @@ export class Engine {
       this.dyn.remove(t.group);
       this.dyn.remove(t.hitMesh);
       this.clearAirPost(t);
+      if (t.kind === "observer") this.clearLiaison();
       const rubble = new THREE.Group();
       for (let i = 0; i < 5; i++) {
         const b = this.box(rand(0.6, 1.4), rand(0.3, 0.8), rand(0.6, 1.4), Math.random() < 0.5 ? this.mats.burnt : this.mats.burntDark, rand(-1.4, 1.4), rand(0.15, 0.4), rand(-1.4, 1.4));
@@ -1671,6 +1672,11 @@ export class Engine {
       kind = "tracer";
       sfx.play("mg");
       this.addShake(0.05);
+    } else if (def.kind === "atrifle") {
+      mesh = new THREE.Mesh(this.projGeoTracer, this.projMatTracer);
+      kind = "tracer";
+      sfx.play("rifle");
+      this.addShake(0.08);
     } else if (def.kind === "at") {
       mesh = new THREE.Mesh(this.projGeoShell, this.projMatShell);
       sfx.play("cannon");
@@ -1710,9 +1716,10 @@ export class Engine {
       if (old) { this.dyn.remove(old.mesh); }
     }
     // muzzle flash
-    this.burst(muzzlePos, def.kind === "mg" ? 3 : 7, def.kind === "mg" ? 5 : 8, 0.14, def.kind === "mg" ? 0.7 : 1.5, new THREE.Color(1, 0.85, 0.5), 2);
-    this.flashAt(muzzlePos, def.kind === "mg" ? 14 : 46);
-    if (def.kind !== "mg") {
+    const light = def.kind === "mg" || def.kind === "atrifle";
+    this.burst(muzzlePos, light ? 3 : 7, light ? 5 : 8, 0.14, light ? 0.7 : 1.5, new THREE.Color(1, 0.85, 0.5), 2);
+    this.flashAt(muzzlePos, light ? 14 : 46);
+    if (!light) {
       for (let i = 0; i < 2; i++) {
         this.spawnSmoke(new THREE.Vector3(t.pos.x + rand(-1.4, 1.4), t.pos.y + 0.3, t.pos.z + rand(-1.4, 1.4)), new THREE.Vector3(rand(-1, 1), 1.2, rand(-1, 1)), 1.4, 1.3, 0.62, 1.6);
       }
@@ -1891,6 +1898,7 @@ export class Engine {
     for (const s of this.smokes) s.life = 0;
     for (const c of this.craters) { c.life = 0; c.mesh.visible = false; c.mat.opacity = 0; }
     for (const g of this.gibs) { g.life = 0; g.mesh.visible = false; }
+    this.liaison.clear();
     this.rp = 400; this.cp = 2; this.baseHp = BASE_MAX; this.kills = 0; this.score = 0; this.playT = 0;
     this.waveIdx = -1; this.waveT = 0; this.between = true; this.nextIn = 12;
     this.spawnQueue = []; this.endT = -1;
@@ -2073,6 +2081,37 @@ export class Engine {
     this.pushHud();
   }
 
+  // observer ARTILLERY LIAISON: tracked +15% range buffs on nearby guns
+  private liaison = new Set<number>();
+  private liaisonRefresh(t: Tower) {
+    const R = 40;
+    const near = new Set<number>();
+    for (const o of this.towers) {
+      if (o === t || o.dead || o.def.structure || o.def.ammo === 0) continue;
+      if (o.pos.distanceTo(t.pos) < R) near.add(o.id);
+    }
+    for (const id of near) {
+      if (!this.liaison.has(id)) {
+        const o = this.towers.find((x) => x.id === id);
+        if (o) { o.rangeMul *= 1.15; this.liaison.add(id); }
+      }
+    }
+    for (const id of [...this.liaison]) {
+      if (!near.has(id)) {
+        const o = this.towers.find((x) => x.id === id);
+        if (o && !o.dead) o.rangeMul /= 1.15;
+        this.liaison.delete(id);
+      }
+    }
+  }
+  private clearLiaison() {
+    for (const id of this.liaison) {
+      const o = this.towers.find((x) => x.id === id);
+      if (o && !o.dead) o.rangeMul /= 1.15;
+    }
+    this.liaison.clear();
+  }
+
   private logT = 0;
   // autonomous logistics: ammunition carriers haul rounds from HQ to low emplacements
   private updateLogistics(dt: number) {
@@ -2105,6 +2144,7 @@ export class Engine {
     this.dyn.remove(t.group);
     this.dyn.remove(t.hitMesh);
     this.clearAirPost(t);
+    if (t.kind === "observer") this.clearLiaison();
     t.dead = true;
     this.towers = this.towers.filter((x) => x !== t);
     this.deselect();
@@ -2613,6 +2653,8 @@ export class Engine {
         sfx.play("click");
       }
     }
+    // ARTILLERY LIAISON (final upgrade): +15% range to guns near this team
+    if (t.tier >= 3) this.liaisonRefresh(t);
   }
 
   private updateSapper(t: Tower, dt: number) {
