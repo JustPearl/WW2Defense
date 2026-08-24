@@ -108,7 +108,7 @@ function ControlsGuide({ compact = false }: { compact?: boolean }) {
     ["LEFT CLICK", "Place / Select / Manual fire"],
     ["RIGHT CLICK / ESC", "Cancel / Deselect"],
     ["SPACE", "Tactical pause (orders still work)"],
-    ["1–7", "Arm emplacement blueprint"],
+    ["1–8", "Arm emplacement blueprint"],
     ["U / T", "Upgrade / Targeting"],
     ["B", "Artillery strike mode"],
     ["F / M", "Game speed / Mute"],
