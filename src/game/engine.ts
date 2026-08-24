@@ -1647,7 +1647,7 @@ export class Engine {
     const hk = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7"];
     const idx = hk.indexOf(ev.code);
     if (idx >= 0) {
-      const kinds: TowerKind[] = ["mg", "at", "flak", "arty", "hedgehog", "wire", "mines"];
+      const kinds: TowerKind[] = ["mg", "at", "flak", "arty", "airpost", "hedgehog", "wire", "mines"];
       this.selectBuild(this.buildKind === kinds[idx] ? null : kinds[idx]);
     }
     if (ev.code === "Enter" && this.state === "menu") this.startGame();
