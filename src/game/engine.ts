@@ -42,7 +42,7 @@ const angLerp = (a: number, b: number, t: number) => {
   if (d < -Math.PI) d += Math.PI * 2;
   return a + d * clamp(t, 0, 1);
 };
-const TARGET_MODES = ["FIRST", "NEAR", "STRONG"];
+const TARGET_MODES = ["FIRST", "NEAR", "STRONG", "AIR PRIORITY"];
 
 // ── entity types ────────────────────────────────────────────────────────────
 interface Tower {
@@ -53,7 +53,7 @@ interface Tower {
   pos: THREE.Vector3; hp: number; maxHp: number; ammo: number; maxAmmo: number;
   cooldown: number; reloadT: number; reloadMax: number; aiT: number;
   tier: number; dmgMul: number; penMul: number; rofMul: number; rangeMul: number;
-  splashMul: number; travMul: number; airPriority: boolean;
+  splashMul: number; travMul: number;
   targetMode: number; target: Enemy | null; recoil: number; flashT: number;
   elev: number;
   dead: boolean; invested: number; hpBar: THREE.Group | null;
@@ -475,6 +475,18 @@ export class Engine {
 
   private makeWreckMesh(kind: EnemyKind): THREE.Group {
     const g = new THREE.Group();
+    if (kind === "stuka") {
+      // smouldering aircraft carcass
+      const fuse = this.box(0.8, 0.8, 4.4, this.mats.burnt, 0, 0.45, 0);
+      fuse.castShadow = true;
+      fuse.rotation.z = rand(-0.25, 0.25);
+      const wing = this.box(6.6, 0.1, 1.5, this.mats.burntDark, 0, 0.55, 0.25);
+      wing.rotation.z = rand(-0.12, 0.12);
+      g.add(fuse, wing);
+      g.add(this.box(0.62, 0.55, 0.62, this.mats.burntDark, 0, 0.95, 0.35));
+      g.add(this.box(0.12, 0.9, 1.0, this.mats.burnt, 0, 0.9, -1.9));
+      return g;
+    }
     const hull = this.box(2.2, 0.9, 4.2, this.mats.burnt, 0, 0.75, 0);
     hull.castShadow = true;
     g.add(hull);
@@ -693,7 +705,7 @@ export class Engine {
   }
 
   private damageEnemy(e: Enemy, dmg: number, pen: number, hitPoint: THREE.Vector3, velDir: THREE.Vector3) {
-    if (e.dead) return;
+    if (e.dead || e.falling) return;
     let finalDmg = dmg;
     if (pen < 900) {
       const fx = Math.sin(e.heading), fz = Math.cos(e.heading);
@@ -736,21 +748,25 @@ export class Engine {
   }
 
   private killEnemy(e: Enemy) {
-    if (e.dead) return;
-    e.dead = true;
+    if (e.dead || e.falling) return;
     this.kills++;
     this.rp += e.def.reward;
     this.score += e.def.reward;
     sfx.play("coin");
     if (e.kind === "infantry") {
+      e.dead = true;
       this.burst(e.pos.clone().setY(e.pos.y + 0.8), 12, 8, 0.5, 0.5, new THREE.Color(0.55, 0.25, 0.18), 12);
       this.burst(e.pos.clone().setY(e.pos.y + 0.6), 6, 5, 0.4, 0.4, new THREE.Color(0.35, 0.38, 0.25), 10);
       this.dyn.remove(e.group);
     } else if (e.flying) {
-      e.falling = true; e.fallVy = 0;
-      this.burst(e.pos, 14, 9, 0.5, 0.7, new THREE.Color(1, 0.6, 0.25));
-      this.spawnSmoke(e.pos.clone(), new THREE.Vector3(0, 1, 0), 1.6, 2.2, 0.2);
+      // MAYDAY — crippled aircraft, spiral down in flames (stays alive until it crashes)
+      e.falling = true; e.fallVy = -1;
+      sfx.play("whistle");
+      this.onUi({ t: "toast", text: "ENEMY AIRCRAFT CRIPPLED — MAYDAY, MAYDAY" });
+      this.burst(e.pos, 16, 10, 0.55, 0.85, new THREE.Color(1, 0.55, 0.2));
+      this.spawnSmoke(e.pos.clone(), new THREE.Vector3(0, 1, 0), 1.8, 2.4, 0.28);
     } else {
+      e.dead = true;
       this.explode(e.pos.clone().setY(e.pos.y + 1), e.def.radius * 1.7, 0, { big: e.kind === "panther" || e.kind === "panzer" });
       const w: Wreck = { group: this.makeWreckMesh(e.kind), life: 34, smokeT: 0 };
       w.group.position.copy(e.pos);
@@ -851,31 +867,33 @@ export class Engine {
       group.add(turret, soldier(0, -1.1), soldier(1.15, -0.4));
       loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "at") {
-      // wheels + axle stay planted; the whole carriage pivots on the axle
+      // the whole towed carriage — wheels, axle, trails, spade, shield & barrel — traverses as one
+      turret.position.y = 0;
       const w1 = this.cyl(0.55, 0.26, this.mats.track, -0.85, 0.55, 0);
       w1.rotation.z = Math.PI / 2;
       const w2 = w1.clone(); w2.position.x = 0.85;
-      group.add(w1, w2, this.cyl(0.15, 1.8, this.mats.steelDark, 0, 0.55, 0));
-      turret.position.y = 0.95;
-      const trail = this.box(1.5, 0.5, 2.6, this.mats.hullDark, 0, -0.4, -0.6);
-      const spade = this.box(1.5, 0.75, 0.18, this.mats.steelDark, 0, -0.5, -1.98);
-      const shield = this.box(1.7, 1.05, 0.1, this.mats.hull, 0, 0.5, 0.55);
+      const axle = this.cyl(0.11, 1.85, this.mats.steelDark, 0, 0.55, 0);
+      axle.rotation.z = Math.PI / 2;
+      const trail = this.box(1.5, 0.45, 2.7, this.mats.hullDark, 0, 0.42, -0.75);
+      const spade = this.box(1.5, 0.7, 0.16, this.mats.steelDark, 0, 0.32, -2.1);
+      const shield = this.box(1.7, 1.05, 0.1, this.mats.hull, 0, 1.45, 0.5);
       shield.rotation.x = -0.14;
+      barrel.position.y = 1.37; // trunnion height: elevation pivots here
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
       tube.scale.set(0.085, 3.1, 0.085);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, 0.42, 1.8);
+      tube.position.set(0, 0, 1.8);
       barrel.add(tube);
-      muzzle.position.set(0, 0.42, 3.4);
+      muzzle.position.set(0, 0, 3.4);
       barrel.add(muzzle);
-      breech = this.box(0.42, 0.4, 0.5, this.mats.steelDark, 0, 0.42, 0.1);
+      breech = this.box(0.42, 0.4, 0.5, this.mats.steelDark, 0, 0, 0.1);
       barrel.add(breech);
-      turret.add(trail, spade, shield, barrel);
+      turret.add(w1, w2, axle, trail, spade, shield, barrel);
       // crew rides with the carriage
-      const gunner = soldier(0, -1.5, true); gunner.position.y = -0.95;
-      const load = soldier(1.1, -0.7); load.position.y = -0.95;
+      const gunner = soldier(0, -1.6, true);
+      const load = soldier(1.1, -0.7);
       turret.add(gunner, load);
-      group.add(turret, soldier(-1.35, -0.4));
+      group.add(turret);
       loader = load;
     } else if (kind === "flak") {
       for (let i = 0; i < 4; i++) {
@@ -904,20 +922,24 @@ export class Engine {
       group.add(turret, soldier(1.3, -0.8), soldier(-1.3, -0.8), soldier(0, -1.5));
       loader = group.children[group.children.length - 2] as THREE.Object3D;
     } else if (kind === "arty") {
-      // heavy base platform with four outrigger pads
-      group.add(this.cyl(2.1, 0.26, this.mats.hullDark, 0, 0.13, 0));
-      for (let i = 0; i < 4; i++) {
-        const a = Math.PI / 4 + (i * Math.PI) / 2;
-        const arm = this.box(0.42, 0.22, 3.1, this.mats.hullDark, 0, 0.18, 0);
-        arm.rotation.y = a;
-        arm.position.set(Math.sin(a) * 1.1, 0.18, Math.cos(a) * 1.1);
-        group.add(arm);
-        group.add(this.box(0.72, 0.3, 0.72, this.mats.steel, Math.sin(a) * 2.35, 0.15, Math.cos(a) * 2.35));
-      }
-      group.add(this.cyl(0.9, 0.95, this.mats.hull, 0, 0.73, 0));
-      turret.position.y = 1.25;
+      // M114-style trailer mount: two wheels, split trails with spades, gun on a pedestal
+      turret.position.y = 0;
+      const w1 = this.cyl(0.62, 0.3, this.mats.track, -1.05, 0.62, 0);
+      w1.rotation.z = Math.PI / 2;
+      const w2 = w1.clone(); w2.position.x = 1.05;
+      const axle = this.cyl(0.13, 2.25, this.mats.steelDark, 0, 0.62, 0);
+      axle.rotation.z = Math.PI / 2;
+      const trailL = this.box(0.34, 0.3, 3.3, this.mats.hullDark, -0.6, 0.4, -1.5);
+      trailL.rotation.y = 0.2;
+      const trailR = this.box(0.34, 0.3, 3.3, this.mats.hullDark, 0.6, 0.4, -1.5);
+      trailR.rotation.y = -0.2;
+      const spadeL = this.box(0.5, 0.55, 0.16, this.mats.steelDark, -0.92, 0.3, -3.05);
+      const spadeR = this.box(0.5, 0.55, 0.16, this.mats.steelDark, 0.92, 0.3, -3.05);
+      const mount = this.cyl(0.72, 0.8, this.mats.hull, 0, 0.9, 0);
+      turret.add(w1, w2, axle, trailL, trailR, spadeL, spadeR, mount);
       const pivot = new THREE.Group();
-      pivot.rotation.x = -1.05; // high-angle howitzer mount
+      pivot.position.y = 1.55;
+      pivot.rotation.x = -1.0; // high-angle howitzer mount
       const cradle = this.box(0.64, 0.64, 1.6, this.mats.hull, 0, 0, -0.35);
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
       tube.scale.set(0.14, 3.9, 0.14);
@@ -934,8 +956,10 @@ export class Engine {
       pivot.add(barrel);
       turret.add(pivot);
       elevNode = pivot;
-      group.add(turret, soldier(1.6, -0.9), soldier(-1.6, -0.9), soldier(0, -1.9));
-      loader = group.children[group.children.length - 2] as THREE.Object3D;
+      const load = soldier(1.6, -0.9);
+      turret.add(load, soldier(-1.6, -0.9), soldier(0, -2.0));
+      group.add(turret);
+      loader = load;
     } else if (kind === "hedgehog") {
       for (let i = 0; i < 3; i++) {
         const beam = this.box(0.3, 0.3, 3.4, this.mats.steel, 0, 0.9, 0);
@@ -1041,7 +1065,7 @@ export class Engine {
       pos: new THREE.Vector3(x, y, z),
       hp: def.hp, maxHp: def.hp, ammo: def.ammo, maxAmmo: def.ammo,
       cooldown: 0, reloadT: 0, reloadMax: def.rof > 0 ? 1 / def.rof : 0, aiT: Math.random() * 0.12,
-      tier: 0, dmgMul: 1, penMul: 1, rofMul: 1, rangeMul: 1, splashMul: 1, travMul: 1, airPriority: false,
+      tier: 0, dmgMul: 1, penMul: 1, rofMul: 1, rangeMul: 1, splashMul: 1, travMul: 1,
       targetMode: 0, target: null, recoil: 0, flashT: 0,
       elev: kind === "flak" ? 0.55 : kind === "arty" ? 1.05 : 0,
       dead: false, invested: def.cost, hpBar: null,
@@ -1577,7 +1601,7 @@ export class Engine {
     } else if (t.kind === "flak") {
       if (t.tier === 0) { t.splashMul *= 1.7; }
       else if (t.tier === 1) { t.rofMul *= 1.3; t.travMul *= 1.3; }
-      else { t.rangeMul *= 1.25; t.dmgMul *= 1.2; t.airPriority = true; }
+      else { t.rangeMul *= 1.25; t.dmgMul *= 1.2; t.rofMul *= 1.25; }
     } else if (t.kind === "arty") {
       if (t.tier === 0) { t.splashMul *= 1.6; }
       else if (t.tier === 1) { t.maxHp += 180; t.hp = t.maxHp; }
@@ -1631,7 +1655,7 @@ export class Engine {
   cycleTargetMode() {
     const t = this.selected;
     if (!t || t.dead || t.def.structure) return;
-    t.targetMode = (t.targetMode + 1) % 3;
+    t.targetMode = (t.targetMode + 1) % (t.def.antiAir ? 4 : 3);
     sfx.play("click");
     this.onUi({ t: "toast", text: `TARGETING: ${TARGET_MODES[t.targetMode]}` });
     this.pushHud();
@@ -1793,19 +1817,24 @@ export class Engine {
       e.group.scale.setScalar(pulse);
 
       if (e.falling) {
-        e.fallVy -= 18 * dt;
+        // death spiral: accelerating fall, tightening turn, increasing roll and nose-down
+        e.fallVy -= 15 * dt;
         e.pos.y += e.fallVy * dt;
-        e.pos.x += Math.sin(e.heading) * e.def.speed * 0.4 * dt;
-        e.pos.z += Math.cos(e.heading) * e.def.speed * 0.4 * dt;
-        e.group.rotation.z += 2.4 * dt;
-        e.group.rotation.x += 1.2 * dt;
-        if (Math.random() < 0.4) this.spawnSmoke(e.pos.clone(), new THREE.Vector3(0, 1.5, 0), 1.2, 1.8, 0.22);
+        e.heading += 3.0 * dt;                                  // tightening spiral
+        e.pos.x += Math.sin(e.heading) * 8 * dt;
+        e.pos.z += Math.cos(e.heading) * 8 * dt;
+        e.group.rotation.y = e.heading;
+        e.group.rotation.z += 3.4 * dt;                          // barrel roll
+        e.group.rotation.x = Math.min(1.0, e.group.rotation.x + 1.3 * dt); // nose drops
+        this.spawnSmoke(e.pos.clone(), new THREE.Vector3(rand(-1, 1), 1.4, rand(-1, 1)), 1.5, 2.2, 0.32);
+        if (Math.random() < 0.55) this.spawnSpark(e.pos.clone(), new THREE.Vector3(rand(-4, 4), rand(-1, 5), rand(-4, 4)), 0.42, 0.75, new THREE.Color(1, 0.5, 0.12), 6);
         e.group.position.copy(e.pos);
-        if (e.pos.y <= this.heightAt(e.pos.x, e.pos.z) + 0.5) {
-          this.explode(e.pos.clone(), 5, 60, { big: true, hurtsTowers: true, crater: 1.2 });
-          const w: Wreck = { group: this.makeWreckMesh("panzer"), life: 30, smokeT: 0 };
+        if (e.pos.y <= this.heightAt(e.pos.x, e.pos.z) + 0.6) {
+          this.explode(e.pos.clone(), 5.5, 60, { big: true, hurtsTowers: true, crater: 1.3 });
+          const w: Wreck = { group: this.makeWreckMesh("stuka"), life: 30, smokeT: 0 };
           w.group.position.set(e.pos.x, this.heightAt(e.pos.x, e.pos.z), e.pos.z);
-          w.group.scale.setScalar(0.7);
+          w.group.rotation.y = e.heading;
+          w.group.scale.setScalar(0.8);
           this.dyn.add(w.group);
           this.wrecks.push(w);
           this.dyn.remove(e.group);
@@ -1980,16 +2009,17 @@ export class Engine {
           const d = e.pos.distanceTo(t.pos);
           if (d > range || d < t.def.minRange + 1.5) continue;
           let val = 0;
-          if (t.targetMode === 0) val = e.dist + (t.airPriority && e.flying ? 1e5 : 0);
-          else if (t.targetMode === 1) val = -d + (t.airPriority && e.flying ? 1e5 : 0);
-          else val = e.hp + (t.airPriority && e.flying ? 1e5 : 0);
+          if (t.targetMode === 3) val = (e.flying ? 1e6 : 0) + e.dist; // air first, then closest
+          else if (t.targetMode === 0) val = e.dist;
+          else if (t.targetMode === 1) val = -d;
+          else val = e.hp;
           if (val > bestVal) { bestVal = val; best = e; }
         }
         t.target = best;
       }
 
       // barrel elevation (idle: MG/AT level, Flak scans skyward)
-      let elevDes = t.kind === "flak" ? 0.42 : 0.04;
+      let elevDes = t.kind === "flak" ? 0.42 : t.kind === "arty" ? 1.0 : 0.04;
       let pitchOk = true;
       if (t.target && !t.target.dead) {
         const aim = this.aimPrediction(t, t.target);

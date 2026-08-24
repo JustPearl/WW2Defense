@@ -34,7 +34,7 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   mg: {
     kind: "mg", name: "M2 .50 CAL MG NEST", short: "MG NEST", hotkey: "1",
     cost: 120, hp: 130, range: 26, rof: 6.5, dmg: 4, pen: 6, splash: 0, splashDmg: 0,
-    projSpeed: 95, lob: 0, ammo: 260, antiAir: true, structure: false, traverse: 4.2, minRange: 0,
+    projSpeed: 95, lob: 0, ammo: 260, antiAir: false, structure: false, traverse: 4.2, minRange: 0,
     upgrades: [
       { name: "API ROUNDS", desc: "+60% damage, +4 pen", cost: 150 },
       { name: "SANDBAG REINFORCEMENT", desc: "+120 max HP, full repair", cost: 130 },
@@ -58,7 +58,7 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
     upgrades: [
       { name: "TIME-FUSE SHELLS", desc: "+70% splash damage & radius", cost: 260 },
       { name: "ZUGAPP TRAILER MOUNT", desc: "+30% traverse & fire rate", cost: 230 },
-      { name: "RADAR INTEGRATION", desc: "+25% range & damage, air priority", cost: 310 },
+      { name: "RADAR FIRE CONTROL", desc: "+25% range, +20% damage, +25% fire rate", cost: 310 },
     ],
   },
   arty: {
