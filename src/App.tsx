@@ -310,6 +310,19 @@ export default function App() {
                     </>
                   )}
                 </div>
+                {!sel.structure && (
+                  <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[var(--dim)]">
+                    <span>DOCTRINE</span>
+                    <span className="hud-num text-right text-[var(--paper)]">
+                      {sel.kind === "mg" ? "SUPPRESSION FIRE" :
+                       sel.kind === "at" ? "APHE TANK KILLER" :
+                       sel.kind === "flak" ? "AIR DEFENSE + HE" :
+                       sel.kind === "arty" ? "INDIRECT FIRE" :
+                       sel.kind === "atrifle" ? "LIGHT ARMOR SNIPER" :
+                       sel.kind === "airpost" ? "CLOSE AIR SUPPORT" : "SUPPORT"}
+                    </span>
+                  </div>
+                )}
                 {sel.kind === "airpost" ? (
                   <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
                     THUNDERBOLT LOITERS OVERHEAD &amp; STRAFES ENEMY GROUPS

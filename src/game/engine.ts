@@ -69,13 +69,13 @@ interface Enemy {
   dead: boolean; flying: boolean; lane: number; flyY: number; bombDropped: boolean; sirenPlayed: boolean;
   targetId: number; falling: boolean; fallVy: number; hpBar: THREE.Group | null;
   phase: number; bombs: number; strafeT: number; armorMul: number;
-  burnT: number; markT: number; markMul: number;
+  burnT: number; markT: number; markMul: number; supT: number;
 }
 interface Proj {
   mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3;
   dmg: number; pen: number; splash: number; splashDmg: number;
   kind: "tracer" | "shell" | "flak" | "bomb" | "arty";
-  life: number; manual: boolean; dead: boolean;
+  life: number; manual: boolean; dead: boolean; sup: boolean;
 }
 interface Particle {
   pos: THREE.Vector3; vel: THREE.Vector3; life: number; maxLife: number;
@@ -753,6 +753,25 @@ export class Engine {
     this.flashAt(pos, big ? 90 : 40);
     this.addShake(big ? 1.1 : 0.45);
     if (crater > 0) this.addDecal(pos, r * 0.55 * crater);
+    if (big) {
+      // towering dust column kicked up by heavy shells
+      for (let i = 0; i < 7; i++) {
+        this.spawnSmoke(
+          pos.clone().add(new THREE.Vector3(rand(-0.7, 0.7), rand(0, 1), rand(-0.7, 0.7))),
+          new THREE.Vector3(rand(-0.8, 0.8), rand(7, 12), rand(-0.8, 0.8)),
+          rand(1.6, 2.6), rand(1.2, 2), rand(0.3, 0.42), 1.7,
+        );
+      }
+      // ejected debris
+      for (let i = 0; i < 8; i++) {
+        const a = rand(0, Math.PI * 2);
+        this.spawnSpark(
+          pos.clone().setY(pos.y + 0.3),
+          new THREE.Vector3(Math.cos(a) * rand(6, 12), rand(8, 15), Math.sin(a) * rand(6, 12)),
+          rand(0.7, 1.1), rand(0.3, 0.55), new THREE.Color(0.34, 0.26, 0.15), 16,
+        );
+      }
+    }
     sfx.play(big ? "boomBig" : "boom");
     if (big) {
       this.onUi({ t: "flash", p: 1 });
@@ -779,8 +798,10 @@ export class Engine {
     }
   }
 
-  private damageEnemy(e: Enemy, dmg: number, pen: number, hitPoint: THREE.Vector3, velDir: THREE.Vector3) {
+  private damageEnemy(e: Enemy, dmg: number, pen: number, hitPoint: THREE.Vector3, velDir: THREE.Vector3, suppress = false) {
     if (e.dead || e.falling) return;
+    // .50 cal fire pins infantry and bikes down
+    if (suppress && !e.flying && (e.kind === "infantry" || e.kind === "bike")) e.supT = 1.15;
     let finalDmg = dmg;
     // forward-observer target designation
     if (e.markT > 0) finalDmg *= e.markMul;
@@ -791,6 +812,14 @@ export class Engine {
       const armor = (c < -0.5 ? e.def.armorF : c > 0.5 ? e.def.armorR : e.def.armorS) * e.armorMul;
       if (pen >= armor) {
         this.burst(hitPoint, 6, 9, 0.3, 0.45, new THREE.Color(1, 0.8, 0.4));
+        // APHE: a penetrating AP round detonates inside an armored vehicle
+        if (!e.flying && e.def.radius > 1.2) {
+          e.hp -= dmg * 0.5;
+          this.burst(hitPoint, 12, 12, 0.45, 0.6, new THREE.Color(1, 0.6, 0.2));
+          this.flashAt(hitPoint, 34);
+          sfx.play("boom");
+          this.addShake(0.22);
+        }
       } else {
         finalDmg = dmg * 0.22;
         if (Math.random() < 0.45) {
@@ -933,73 +962,145 @@ export class Engine {
       }
       group.add(this.cyl(1.3, 0.14, this.mats.dirt, 0, 0.07, 0));
       turret.position.y = 0.62;
-      const tripod = this.cyl(0.06, 0.6, this.mats.gunmetal, 0, 0.3, 0);
-      const body = this.box(0.34, 0.3, 1.15, this.mats.gunmetal, 0, 0.66, 0.1);
-      barrel.add(body);
+      // M41 tripod: three splayed legs from a head
+      const head = this.cyl(0.1, 0.16, this.mats.gunmetal, 0, 0.55, 0);
+      for (let i = 0; i < 3; i++) {
+        const leg = this.cyl(0.045, 0.78, this.mats.gunmetal, 0, 0, 0);
+        leg.position.set(Math.sin(i * 2.1) * 0.26, 0.2, Math.cos(i * 2.1) * 0.3);
+        leg.rotation.z = Math.sin(i * 2.1) * 0.62;
+        leg.rotation.x = Math.cos(i * 2.1) * 0.62;
+        turret.add(leg);
+      }
+      turret.add(head);
+      // receiver with top cover + rear spade grips
+      const body = this.box(0.3, 0.32, 1.25, this.mats.gunmetal, 0, 0.66, 0.05);
+      const cover = this.box(0.24, 0.09, 0.6, this.mats.steelDark, 0, 0.84, -0.05);
+      const gripL = this.box(0.05, 0.22, 0.05, this.mats.steelDark, -0.16, 0.62, -0.62);
+      const gripR = this.box(0.05, 0.22, 0.05, this.mats.steelDark, 0.16, 0.62, -0.62);
+      gripL.rotation.x = gripR.rotation.x = -0.35;
+      barrel.add(body, cover, gripL, gripR);
+      // heavy barrel with cooling perforations + muzzle booster
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.steelDark);
-      tube.scale.set(0.06, 1.5, 0.06);
+      tube.scale.set(0.062, 1.35, 0.062);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, 0.66, 1.3);
+      tube.position.set(0, 0.66, 1.25);
       barrel.add(tube);
+      const booster = this.cyl(0.1, 0.22, this.mats.steelDark, 0, 0.66, 1.95);
+      booster.rotation.x = Math.PI / 2;
+      barrel.add(booster);
       muzzle.position.set(0, 0.66, 2.1);
       barrel.add(muzzle);
-      turret.add(tripod, barrel);
+      // ammunition can + belt pouch on the left
+      const ammoCan = this.box(0.34, 0.26, 0.5, this.mats.oliveDark, -0.42, 0.6, -0.15);
+      turret.add(ammoCan, barrel);
       group.add(turret, soldier(0, -1.1), soldier(1.15, -0.4));
       loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "at") {
       // the whole towed carriage — wheels, axle, trails, spade, shield & barrel — traverses as one
       turret.position.y = 0;
-      const w1 = this.cyl(0.55, 0.26, this.mats.track, -0.85, 0.55, 0);
-      w1.rotation.z = Math.PI / 2;
-      const w2 = w1.clone(); w2.position.x = 0.85;
-      const axle = this.cyl(0.11, 1.85, this.mats.steelDark, 0, 0.55, 0);
+      // pressed-steel wheels with spokes and hubs
+      const makeWheel = (x: number): THREE.Group => {
+        const wg = new THREE.Group();
+        const tire = this.cyl(0.55, 0.24, this.mats.track, 0, 0, 0);
+        tire.rotation.z = Math.PI / 2;
+        const hub = this.cyl(0.16, 0.26, this.mats.steelDark, 0, 0, 0);
+        hub.rotation.z = Math.PI / 2;
+        wg.add(tire, hub);
+        for (let i = 0; i < 5; i++) {
+          const spoke = this.box(0.07, 0.8, 0.05, this.mats.steelDark, 0, 0, 0);
+          spoke.rotation.x = (i / 5) * Math.PI;
+          wg.add(spoke);
+        }
+        wg.position.set(x, 0.55, 0);
+        return wg;
+      };
+      const w1 = makeWheel(-0.95), w2 = makeWheel(0.95);
+      const axle = this.cyl(0.1, 2.0, this.mats.steelDark, 0, 0.55, 0);
       axle.rotation.z = Math.PI / 2;
-      const trail = this.box(1.5, 0.45, 2.7, this.mats.hullDark, 0, 0.42, -0.75);
-      const spade = this.box(1.5, 0.7, 0.16, this.mats.steelDark, 0, 0.32, -2.1);
-      const shield = this.box(1.7, 1.05, 0.1, this.mats.hull, 0, 1.45, 0.5);
+      // split trails with spade plates
+      const trailL = this.box(0.22, 0.24, 2.9, this.mats.hullDark, -0.55, 0.4, -1.55);
+      trailL.rotation.y = 0.21;
+      const trailR = this.box(0.22, 0.24, 2.9, this.mats.hullDark, 0.55, 0.4, -1.55);
+      trailR.rotation.y = -0.21;
+      const spadeL = this.box(0.4, 0.5, 0.14, this.mats.steelDark, -0.86, 0.3, -2.92);
+      const spadeR = this.box(0.4, 0.5, 0.14, this.mats.steelDark, 0.86, 0.3, -2.92);
+      // curved upper gun shield with a vision slit
+      const shield = this.box(1.75, 1.1, 0.1, this.mats.hull, 0, 1.5, 0.52);
       shield.rotation.x = -0.14;
+      const slit = this.box(0.6, 0.1, 0.12, this.mats.dark, 0, 1.72, 0.55);
+      // gun cradle with elevation handwheel
+      const cradle = this.box(0.44, 0.44, 1.2, this.mats.hullDark, 0, 1.37, -0.1);
+      const wheel = this.cyl(0.16, 0.06, this.mats.steelDark, 0.42, 1.37, 0.15);
+      wheel.rotation.z = Math.PI / 2;
       barrel.position.y = 1.37; // trunnion height: elevation pivots here
+      // tapered barrel: breech ring, chase, muzzle brake
+      const ring = this.cyl(0.13, 0.3, this.mats.gunmetal, 0, 0, 0.42);
+      ring.rotation.x = Math.PI / 2;
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
-      tube.scale.set(0.085, 3.1, 0.085);
+      tube.scale.set(0.075, 2.9, 0.075);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, 0, 1.8);
-      barrel.add(tube);
+      tube.position.set(0, 0, 1.75);
+      const brake = this.cyl(0.12, 0.32, this.mats.steelDark, 0, 0, 3.22);
+      brake.rotation.x = Math.PI / 2;
+      barrel.add(ring, tube, brake);
       muzzle.position.set(0, 0, 3.4);
       barrel.add(muzzle);
-      breech = this.box(0.42, 0.4, 0.5, this.mats.steelDark, 0, 0, 0.1);
+      breech = this.box(0.42, 0.42, 0.55, this.mats.steelDark, 0, 0, 0.05);
       barrel.add(breech);
-      turret.add(w1, w2, axle, trail, spade, shield, barrel);
-      // crew rides with the carriage
-      const gunner = soldier(0, -1.6, true);
-      const load = soldier(1.1, -0.7);
-      turret.add(gunner, load);
+      turret.add(w1, w2, axle, trailL, trailR, spadeL, spadeR, shield, slit, cradle, wheel, barrel);
+      // crew rides with the carriage: seated gunner, standing loader, ammo limber
+      const gunner = soldier(0, -1.55, true);
+      const load = soldier(1.15, -0.8);
+      const limber = this.box(0.9, 0.5, 0.6, this.mats.oliveDark, -1.2, 0.35, -1.0);
+      turret.add(gunner, load, limber);
       group.add(turret);
       loader = load;
     } else if (kind === "flak") {
+      // cruciform platform: four outriggers with screw-jack leveling pads
       for (let i = 0; i < 4; i++) {
-        const arm = this.box(0.5, 0.24, 3.4, this.mats.hullDark, 0, 0.12, 0);
-        arm.rotation.y = (i * Math.PI) / 2;
-        arm.position.set(Math.sin((i * Math.PI) / 2) * 1.3, 0.12, Math.cos((i * Math.PI) / 2) * 1.3);
-        group.add(arm);
+        const a = (i * Math.PI) / 2 + Math.PI / 4;
+        const arm = this.box(0.42, 0.26, 2.6, this.mats.hullDark, 0, 0, 0);
+        arm.position.set(Math.sin(a) * 1.15, 0.16, Math.cos(a) * 1.15);
+        arm.rotation.y = a;
+        const jack = this.cyl(0.09, 0.4, this.mats.steelDark, Math.sin(a) * 2.25, 0.16, Math.cos(a) * 2.25);
+        const pad = this.cyl(0.24, 0.08, this.mats.steelDark, Math.sin(a) * 2.25, -0.04, Math.cos(a) * 2.25);
+        group.add(arm, jack, pad);
       }
-      group.add(this.cyl(0.7, 0.7, this.mats.hull, 0, 0.55, 0));
+      // central pedestal with slewing ring
+      const pedestal = this.cyl(0.72, 0.85, this.mats.hull, 0, 0.55, 0);
+      const ring = this.cyl(0.85, 0.14, this.mats.steelDark, 0, 1.02, 0);
+      group.add(pedestal, ring);
       turret.position.y = 1.1;
       const pivot = new THREE.Group();
       pivot.rotation.x = -0.55;
-      const cradle = this.box(0.5, 0.5, 1.4, this.mats.hull, 0, 0, -0.2);
+      // cradle, elevation gear housing and sight box
+      const cradle = this.box(0.52, 0.52, 1.5, this.mats.hull, 0, 0, -0.2);
+      const gear = this.box(0.3, 0.44, 0.5, this.mats.hullDark, -0.5, -0.05, -0.1);
+      const sight = this.box(0.22, 0.3, 0.4, this.mats.steelDark, 0.48, 0.25, 0.1);
+      barrel.add(cradle, gear, sight);
+      // L/56 barrel: breech ring, tapered chase, prominent muzzle brake
+      const ringB = this.cyl(0.16, 0.34, this.mats.gunmetal, 0, 0, 0.5);
+      ringB.rotation.x = Math.PI / 2;
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
-      tube.scale.set(0.1, 4.4, 0.1);
+      tube.scale.set(0.09, 4.2, 0.09);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, 0, 2.2);
-      barrel.add(cradle, tube);
-      muzzle.position.set(0, 0, 4.5);
+      tube.position.set(0, 0, 2.3);
+      const brake = this.cyl(0.15, 0.42, this.mats.steelDark, 0, 0, 4.32);
+      brake.rotation.x = Math.PI / 2;
+      barrel.add(ringB, tube, brake);
+      muzzle.position.set(0, 0, 4.55);
       barrel.add(muzzle);
-      const shield = this.box(1.4, 1.0, 0.1, this.mats.hull, 0, 0.3, 0.2);
+      breech = this.box(0.5, 0.5, 0.6, this.mats.steelDark, 0, 0, -0.15);
+      barrel.add(breech);
+      const shield = this.box(1.4, 1.05, 0.1, this.mats.hull, 0, 0.32, 0.35);
+      shield.rotation.x = -0.08;
       barrel.add(shield);
       pivot.add(barrel);
       turret.add(pivot);
       elevNode = pivot;
-      group.add(turret, soldier(1.3, -0.8), soldier(-1.3, -0.8), soldier(0, -1.5));
+      // ammo limber + crew of three
+      const limber = this.box(1.0, 0.5, 0.7, this.mats.oliveDark, -1.6, 0.35, 0.6);
+      group.add(turret, limber, soldier(1.3, -0.8), soldier(-1.3, -0.8), soldier(0, -1.5));
       loader = group.children[group.children.length - 2] as THREE.Object3D;
     } else if (kind === "arty") {
       // M114-style trailer mount: two wheels, split trails with spades, gun on a pedestal
@@ -1016,21 +1117,31 @@ export class Engine {
       const spadeL = this.box(0.5, 0.55, 0.16, this.mats.steelDark, -0.92, 0.3, -3.05);
       const spadeR = this.box(0.5, 0.55, 0.16, this.mats.steelDark, 0.92, 0.3, -3.05);
       const mount = this.cyl(0.72, 0.8, this.mats.hull, 0, 0.9, 0);
-      turret.add(w1, w2, axle, trailL, trailR, spadeL, spadeR, mount);
+      const traverse = this.cyl(0.17, 0.07, this.mats.steelDark, 0.75, 1.15, 0.5);
+      traverse.rotation.z = Math.PI / 2;
+      turret.add(w1, w2, axle, trailL, trailR, spadeL, spadeR, mount, traverse);
       const pivot = new THREE.Group();
       pivot.position.y = 1.55;
       pivot.rotation.x = -1.0; // high-angle howitzer mount
-      const cradle = this.box(0.64, 0.64, 1.6, this.mats.hull, 0, 0, -0.35);
+      const cradle = this.box(0.66, 0.66, 1.7, this.mats.hull, 0, 0, -0.35);
+      // twin recoil cylinders above the barrel + equilibrator below
+      const recL = this.cyl(0.07, 2.6, this.mats.steelDark, -0.22, 0.42, 1.5);
+      const recR = this.cyl(0.07, 2.6, this.mats.steelDark, 0.22, 0.42, 1.5);
+      const equil = this.cyl(0.09, 2.2, this.mats.hullDark, 0, -0.45, 1.3);
+      recL.rotation.x = recR.rotation.x = equil.rotation.x = Math.PI / 2;
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
       tube.scale.set(0.14, 3.9, 0.14);
       tube.rotation.x = Math.PI / 2;
       tube.position.set(0, 0, 2.05);
-      const brake = this.cyl(0.2, 0.34, this.mats.steelDark, 0, 0, 3.95);
+      const brake = this.cyl(0.21, 0.4, this.mats.steelDark, 0, 0, 4.0);
       brake.rotation.x = Math.PI / 2;
-      barrel.add(cradle, tube, brake);
+      barrel.add(cradle, recL, recR, equil, tube, brake);
       muzzle.position.set(0, 0, 4.35);
       barrel.add(muzzle);
-      barrel.add(this.box(1.5, 1.05, 0.1, this.mats.hull, 0, -0.2, 0.3));
+      // curved gun shield
+      const sh = this.box(1.6, 1.1, 0.1, this.mats.hull, 0, -0.15, 0.4);
+      sh.rotation.x = -0.1;
+      barrel.add(sh);
       breech = this.box(0.56, 0.56, 0.72, this.mats.steelDark, 0, 0, -0.6);
       barrel.add(breech);
       pivot.add(barrel);
@@ -1070,39 +1181,61 @@ export class Engine {
       tankL.castShadow = tankR.castShadow = true;
       const capL = this.cyl(0.44, 0.1, this.mats.steelDark, -0.55, 1.9, -0.15);
       const capR = this.cyl(0.44, 0.1, this.mats.steelDark, 0.55, 1.9, -0.15);
+      // tank straps + pressure gauge
+      const strapL1 = this.box(0.1, 0.86, 0.08, this.mats.steelDark, -0.55, 1.35, 0.28);
+      const strapL2 = this.box(0.1, 0.86, 0.08, this.mats.steelDark, -0.55, 1.35, -0.58);
+      const strapR1 = this.box(0.1, 0.86, 0.08, this.mats.steelDark, 0.55, 1.35, 0.28);
+      const strapR2 = this.box(0.1, 0.86, 0.08, this.mats.steelDark, 0.55, 1.35, -0.58);
+      const gauge = this.cyl(0.09, 0.05, this.mats.steel, 0, 1.62, 0.1);
       turret.position.y = 0.95;
       const cradle = this.box(0.42, 0.36, 0.8, this.mats.hullDark, 0, 0, 0.1);
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
-      tube.scale.set(0.09, 1.7, 0.09);
+      tube.scale.set(0.09, 1.6, 0.09);
       tube.rotation.x = Math.PI / 2;
-      tube.position.set(0, 0.05, 0.9);
-      barrel.add(cradle, tube);
-      muzzle.position.set(0, 0.05, 1.85);
+      tube.position.set(0, 0.05, 0.85);
+      // nozzle cone with pilot-light tube
+      const nozzle = this.cyl(0.14, 0.3, this.mats.steelDark, 0, 0.05, 1.72);
+      nozzle.rotation.x = Math.PI / 2;
+      const pilot = this.cyl(0.025, 0.22, this.mats.steel, 0, 0.2, 1.78);
+      barrel.add(cradle, tube, nozzle, pilot);
+      muzzle.position.set(0, 0.05, 1.9);
       barrel.add(muzzle);
       // hose from tanks to nozzle
       const hose = this.cyl(0.05, 1.1, this.mats.dark, -0.3, 0.5, 0.5);
       hose.rotation.x = 1.1;
       turret.add(barrel, hose);
-      group.add(tankL, tankR, capL, capR, turret, soldier(0, -1.5));
+      group.add(tankL, tankR, capL, capR, strapL1, strapL2, strapR1, strapR2, gauge, turret, soldier(0, -1.5));
       loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "atrifle") {
       // PzB 39 anti-tank rifle team: prone gunner, long rifle on bipod
-      const pad = this.box(1.7, 0.1, 2.4, this.mats.dirt, 0, 0.05, 0);
+      const pad = this.box(1.9, 0.12, 2.6, this.mats.dirt, 0, 0.06, 0);
       group.add(pad);
+      // low sandbag parapet across the front of the pit
+      for (let i = 0; i < 4; i++) {
+        const bag = this.box(0.55, 0.26, 0.34, this.mats.sandbag, -0.85 + i * 0.58, 0.15, 1.05);
+        bag.rotation.y = rand(-0.2, 0.2);
+        group.add(bag);
+      }
       turret.position.y = 0.42;
       const stock = this.box(0.14, 0.16, 1.0, this.mats.wood, 0, 0, -0.55);
+      const grip = this.box(0.08, 0.18, 0.08, this.mats.wood, 0, -0.12, -0.2);
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
       tube.scale.set(0.05, 2.6, 0.05);
       tube.rotation.x = Math.PI / 2;
       tube.position.set(0, 0.04, 0.75);
-      barrel.add(stock, tube);
-      muzzle.position.set(0, 0.04, 2.1);
+      // telescopic sight on top + muzzle brake
+      const scope = this.cyl(0.055, 0.5, this.mats.steelDark, 0, 0.18, 0.2);
+      scope.rotation.x = Math.PI / 2;
+      const brk = this.cyl(0.08, 0.16, this.mats.steelDark, 0, 0.04, 2.06);
+      brk.rotation.x = Math.PI / 2;
+      barrel.add(stock, grip, tube, scope, brk);
+      muzzle.position.set(0, 0.04, 2.15);
       barrel.add(muzzle);
       const bipodL = this.cyl(0.03, 0.5, this.mats.steelDark, -0.14, -0.2, 1.4);
       const bipodR = this.cyl(0.03, 0.5, this.mats.steelDark, 0.14, -0.2, 1.4);
       bipodL.rotation.z = 0.3; bipodR.rotation.z = -0.3;
       turret.add(barrel, bipodL, bipodR);
-      // prone gunner behind the rifle
+      // prone gunner behind the rifle, loader with ammunition pouches
       const body = new THREE.Mesh(this.geos.capsule, this.mats.uniform);
       body.scale.set(0.2, 0.34, 0.2);
       body.rotation.x = Math.PI / 2 - 0.15;
@@ -1111,7 +1244,9 @@ export class Engine {
       const head = new THREE.Mesh(this.geos.sphere, this.mats.helmet);
       head.scale.setScalar(0.16);
       head.position.set(0, 0.42, -1.0);
-      group.add(turret, body, head, soldier(1.0, -1.1));
+      const pouch1 = this.box(0.3, 0.18, 0.22, this.mats.oliveDark, -0.6, 0.1, -0.9);
+      const pouch2 = this.box(0.3, 0.18, 0.22, this.mats.oliveDark, -0.95, 0.1, -0.55);
+      group.add(turret, body, head, pouch1, pouch2, soldier(1.0, -1.1));
       loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "observer") {
       // forward observer: map table, tripod spotting scope, radio antenna
@@ -1120,16 +1255,28 @@ export class Engine {
       const leg2 = this.cyl(0.04, 0.85, this.mats.wood, -0.4, 0.42, 0.4);
       const leg3 = this.cyl(0.04, 0.85, this.mats.wood, -0.9, 0.42, 1.0);
       const map = this.box(0.8, 0.02, 0.55, this.mats.barAmber, -0.9, 0.9, 0.7);
-      group.add(table, leg1, leg2, leg3, map);
+      // field telephone + radio set on the table, marker pins on the map
+      const phone = this.box(0.26, 0.2, 0.18, this.mats.oliveDark, -1.45, 1.0, 0.45);
+      const radio = this.box(0.34, 0.24, 0.24, this.mats.hullDark, -0.35, 1.02, 0.45);
+      const pin1 = this.cyl(0.015, 0.1, this.mats.red, -1.0, 0.96, 0.8);
+      const pin2 = this.cyl(0.015, 0.1, this.mats.red, -0.75, 0.96, 0.62);
+      group.add(table, leg1, leg2, leg3, map, phone, radio, pin1, pin2);
+      // antenna mast with guy wires + red signal flag
       group.add(this.cyl(0.05, 4.6, this.mats.steelDark, 1.2, 2.3, -0.8));
       group.add(this.box(1.0, 0.04, 0.04, this.mats.steelDark, 1.2, 3.4, -0.8));
+      const flagPole = this.cyl(0.02, 1.5, this.mats.steelDark, 1.85, 0.75, 0.3);
+      const flag = this.box(0.6, 0.36, 0.03, this.mats.red, 2.15, 1.3, 0.3);
+      group.add(flagPole, flag);
       turret.position.y = 1.25;
       const tripod = this.cyl(0.05, 1.25, this.mats.steelDark, 0, -0.62, 0);
       const scope = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
       scope.scale.set(0.1, 1.0, 0.1);
       scope.rotation.x = Math.PI / 2;
       scope.position.set(0, 0.12, 0.35);
-      barrel.add(scope);
+      // angled eyepiece toward the operator
+      const eye = this.cyl(0.05, 0.26, this.mats.steelDark, 0, 0.02, -0.2);
+      eye.rotation.x = Math.PI / 2 + 0.7;
+      barrel.add(scope, eye);
       muzzle.position.set(0, 0.12, 0.9);
       barrel.add(muzzle);
       turret.add(tripod, barrel);
@@ -1145,7 +1292,19 @@ export class Engine {
       const drum1 = this.cyl(0.34, 0.8, this.mats.oliveDark, 1.6, 0.4, 0.5);
       const drum2 = this.cyl(0.34, 0.8, this.mats.hullDark, -1.6, 0.4, 0.4);
       const trackPart = this.box(0.9, 0.2, 0.5, this.mats.track, 0, 0.1, 1.1);
-      group.add(bench, bleg1, bleg2, vise, toolbox, drum1, drum2, trackPart);
+      // canvas shelter over the bench + spare road wheels + welding bottle
+      const canvasA = this.box(2.9, 0.06, 1.5, this.mats.sandbag, 0, 2.05, -0.55);
+      canvasA.rotation.x = 0.16;
+      const canvasB = this.box(2.9, 0.06, 1.5, this.mats.sandbag, 0, 1.8, 0.55);
+      canvasB.rotation.x = -0.2;
+      const pole1 = this.cyl(0.05, 2.1, this.mats.wood, -1.35, 1.0, 0.95);
+      const pole2 = this.cyl(0.05, 2.1, this.mats.wood, 1.35, 1.0, 0.95);
+      const spareW1 = this.cyl(0.4, 0.18, this.mats.track, -2.2, 0.4, 0.1);
+      spareW1.rotation.z = Math.PI / 2;
+      const spareW2 = this.cyl(0.4, 0.18, this.mats.track, -2.2, 0.4, 0.7);
+      spareW2.rotation.z = Math.PI / 2;
+      const weld = this.cyl(0.16, 0.9, this.mats.olive, 2.15, 0.45, 0.2);
+      group.add(bench, bleg1, bleg2, vise, toolbox, drum1, drum2, trackPart, canvasA, canvasB, pole1, pole2, spareW1, spareW2, weld);
       // repair crane arm (turret) that swings toward damaged emplacements
       turret.position.y = 0;
       const post = this.cyl(0.09, 2.6, this.mats.steelDark, 0, 1.3, 0.2);
@@ -1483,46 +1642,80 @@ export class Engine {
       return { group: g, soldiers };
     }
     if (kind === "stuka") {
+      // Ju 87: signature gull wings, fixed spatted gear, ventral radiator
       const fuse = this.box(0.8, 0.9, 5.0, this.mats.plane, 0, 0, 0);
       fuse.castShadow = true;
       const nose = this.cyl(0.34, 0.9, this.mats.planeAccent, 0, 0, 2.85);
       nose.rotation.x = Math.PI / 2;
-      const wing = this.box(9.4, 0.12, 1.9, this.mats.plane, 0, 0.1, 0.4);
-      wing.castShadow = true;
+      // inverted-gull wings: inner panels angle down, outer panels level
+      for (const sx of [-1, 1]) {
+        const inner = this.box(2.1, 0.12, 2.0, this.mats.plane, sx * 1.35, -0.12, 0.4);
+        inner.rotation.z = sx * 0.28;
+        inner.castShadow = true;
+        const outer = this.box(2.6, 0.11, 1.7, this.mats.plane, sx * 3.55, 0.12, 0.4);
+        outer.rotation.z = sx * -0.05;
+        outer.castShadow = true;
+        g.add(inner, outer);
+      }
+      // fixed landing gear with trouser spats + tail wheel
+      for (const sx of [-0.7, 0.7]) {
+        const leg = this.cyl(0.05, 0.9, this.mats.steelDark, sx, -0.65, 1.2);
+        leg.rotation.z = sx * 0.12;
+        const spat = this.box(0.3, 0.62, 0.9, this.mats.plane, sx, -1.05, 1.2);
+        g.add(leg, spat);
+      }
+      const tailwheel = this.cyl(0.09, 0.08, this.mats.steelDark, 0, -0.55, -2.4);
+      tailwheel.rotation.z = Math.PI / 2;
+      const radiator = this.box(0.5, 0.3, 0.9, this.mats.gunmetal, 0, -0.55, 1.6);
       const tail = this.box(3.0, 0.1, 1.1, this.mats.plane, 0, 0.15, -2.2);
       const fin = this.box(0.12, 1.3, 1.2, this.mats.plane, 0, 0.8, -2.3);
       const canopy = this.box(0.6, 0.4, 1.1, this.mats.gunmetal, 0, 0.6, 0.9);
-      g.add(fuse, nose, wing, tail, fin, canopy);
+      const hornL = this.box(0.06, 0.5, 0.06, this.mats.steelDark, -1.5, -0.75, 0.9);
+      const hornR = this.box(0.06, 0.5, 0.06, this.mats.steelDark, 1.5, -0.75, 0.9);
+      g.add(fuse, nose, tailwheel, radiator, tail, fin, canopy, hornL, hornR);
       return { group: g, soldiers };
     }
     if (kind === "heinkel") {
+      // He 111: glazed nose, twin nacelles with exhausts, dorsal blister, twin fins
       const fuse = this.box(1.1, 1.15, 7.2, this.mats.plane, 0, 0, 0);
       fuse.castShadow = true;
       const nose = this.box(0.9, 0.85, 1.3, this.mats.gunmetal, 0, -0.05, 4.1);
+      const glazing = this.box(0.94, 0.4, 0.7, this.mats.steel, 0, 0.3, 3.9);
       const wing = this.box(13.0, 0.14, 2.4, this.mats.plane, 0, 0.2, 0.6);
       wing.castShadow = true;
       const tail = this.box(4.4, 0.1, 1.4, this.mats.plane, 0, 0.3, -3.3);
       const fin1 = this.box(0.12, 1.3, 1.1, this.mats.plane, -1.1, 0.95, -3.3);
       const fin2 = this.box(0.12, 1.3, 1.1, this.mats.plane, 1.1, 0.95, -3.3);
+      const blister = this.box(0.6, 0.4, 1.0, this.mats.gunmetal, 0, 0.75, -0.4);
       for (const sx of [-2.5, 2.5]) {
         const nac = this.cyl(0.3, 1.7, this.mats.planeAccent, sx, 0.05, 1.4);
         nac.rotation.x = Math.PI / 2;
-        g.add(nac);
+        const exhaust = this.cyl(0.07, 0.9, this.mats.steelDark, sx + (sx > 0 ? 0.3 : -0.3), 0.05, 1.0);
+        exhaust.rotation.x = Math.PI / 2;
+        g.add(nac, exhaust);
       }
-      g.add(fuse, nose, wing, tail, fin1, fin2);
+      g.add(fuse, nose, glazing, wing, tail, fin1, fin2, blister);
       return { group: g, soldiers };
     }
     // vehicles
     if (kind === "bike") {
       for (const sz of [-0.75, 0.75]) {
-        const w = this.cyl(0.28, 0.1, this.mats.track, 0, 0.28, sz);
+        const w = this.cyl(0.28, 0.08, this.mats.track, 0, 0.28, sz);
         w.rotation.z = Math.PI / 2;
-        g.add(w);
+        const hub = this.cyl(0.09, 0.1, this.mats.steelDark, 0, 0.28, sz);
+        hub.rotation.z = Math.PI / 2;
+        g.add(w, hub);
       }
       const frame = this.box(0.24, 0.3, 1.3, this.mats.hullDark, 0, 0.5, 0);
       const tank = this.box(0.26, 0.22, 0.5, this.mats.hull, 0, 0.68, 0.15);
       const bar = this.box(0.6, 0.06, 0.06, this.mats.steelDark, 0, 0.85, 0.6);
-      g.add(frame, tank, bar);
+      // front fender, headlight, rear bedroll
+      const fender = this.box(0.2, 0.05, 0.5, this.mats.hullDark, 0, 0.52, 0.78);
+      const lamp = this.cyl(0.07, 0.08, this.mats.steel, 0, 0.78, 0.82);
+      lamp.rotation.x = Math.PI / 2;
+      const roll = this.cyl(0.12, 0.5, this.mats.sandbag, 0, 0.72, -0.55);
+      roll.rotation.z = Math.PI / 2;
+      g.add(frame, tank, bar, fender, lamp, roll);
       const rider = new THREE.Group();
       const body = new THREE.Mesh(this.geos.capsule, this.mats.uniform);
       body.scale.set(0.16, 0.3, 0.16);
@@ -1544,36 +1737,75 @@ export class Engine {
       const mantlet = this.box(0.7, 0.5, 0.5, this.mats.steelDark, 0, 1.65, 1.7);
       const gun = this.cyl(0.08, 3.0, this.mats.gunmetal, 0, 1.65, 3.2);
       gun.rotation.x = Math.PI / 2;
+      const brake = this.cyl(0.12, 0.24, this.mats.steelDark, 0, 1.65, 4.72);
+      brake.rotation.x = Math.PI / 2;
       for (const sx of [-1.25, 1.25]) {
         const tr = this.box(0.4, 0.8, 4.6, this.mats.track, sx, 0.45, 0);
-        g.add(tr);
+        const fender = this.box(0.5, 0.07, 4.7, this.mats.hullDark, sx, 0.88, 0);
+        g.add(tr, fender);
+        // interleaved road wheels + drive sprocket
+        for (let i = 0; i < 6; i++) {
+          const rw = this.cyl(0.3, 0.12, this.mats.hullDark, sx * 1.02, 0.42, -1.75 + i * 0.7);
+          rw.rotation.z = Math.PI / 2;
+          g.add(rw);
+        }
+        const sprocket = this.cyl(0.26, 0.14, this.mats.steelDark, sx * 1.02, 0.5, 2.15);
+        sprocket.rotation.z = Math.PI / 2;
+        g.add(sprocket);
       }
-      g.add(hull, casemate, glacis, mantlet, gun);
+      // rear exhaust + roof MG shield
+      const exhaust = this.cyl(0.09, 0.5, this.mats.steelDark, 0.6, 1.3, -2.25);
+      const mgShield = this.box(0.4, 0.3, 0.06, this.mats.steelDark, 0.4, 2.15, 1.3);
+      g.add(hull, casemate, glacis, mantlet, gun, brake, exhaust, mgShield);
     } else if (kind === "scout") {
       const hull = this.box(1.7, 0.95, 2.7, this.mats.hull, 0, 0.85, 0);
       hull.castShadow = true;
       const tur = this.box(1.0, 0.5, 1.2, this.mats.hullDark, 0, 1.55, -0.1);
       const gun = this.cyl(0.05, 1.3, this.mats.gunmetal, 0, 1.55, 1.1);
       gun.rotation.x = Math.PI / 2;
-      g.add(hull, tur, gun);
+      // sloped hood, vision slit, headlights
+      const hood = this.box(1.5, 0.6, 0.9, this.mats.hull, 0, 0.85, 1.6);
+      hood.rotation.x = 0.2;
+      const slit = this.box(0.7, 0.08, 0.05, this.mats.dark, 0, 1.15, 1.36);
+      g.add(hull, tur, gun, hood, slit);
+      for (const sx of [-0.5, 0.5]) {
+        const lamp = this.cyl(0.07, 0.1, this.mats.steel, sx, 0.95, 2.0);
+        lamp.rotation.x = Math.PI / 2;
+        g.add(lamp);
+      }
       for (const sx of [-0.85, 0.85]) for (const sz of [-0.9, 0.9]) {
-        const w = this.cyl(0.36, 0.24, this.mats.track, sx, 0.36, sz);
+        const w = this.cyl(0.36, 0.22, this.mats.track, sx, 0.36, sz);
         w.rotation.z = Math.PI / 2;
-        g.add(w);
+        const hub = this.cyl(0.12, 0.24, this.mats.hullDark, sx, 0.36, sz);
+        hub.rotation.z = Math.PI / 2;
+        const fender = this.box(0.42, 0.06, 0.8, this.mats.hullDark, sx, 0.74, sz);
+        g.add(w, hub, fender);
       }
     } else if (kind === "halftrack") {
       const cab = this.box(1.7, 1.15, 1.6, this.mats.hull, 0, 0.95, 1.3);
       cab.castShadow = true;
       const bed = this.box(1.8, 1.0, 2.4, this.mats.hullDark, 0, 0.85, -0.8);
-      const gun = this.cyl(0.05, 1.1, this.mats.gunmetal, 0, 1.6, -0.8);
+      // canvas tilt over the troop bed
+      const canvas = this.box(1.84, 0.06, 2.44, this.mats.sandbag, 0, 1.55, -0.8);
+      canvas.rotation.x = 0.04;
+      const gun = this.cyl(0.05, 1.1, this.mats.gunmetal, 0, 1.75, -0.8);
       gun.rotation.x = Math.PI / 2;
-      g.add(cab, bed, gun);
+      const windshield = this.box(1.4, 0.4, 0.06, this.mats.steel, 0, 1.65, 2.05);
+      windshield.rotation.x = -0.2;
+      g.add(cab, bed, canvas, gun, windshield);
       for (const sx of [-0.9, 0.9]) {
         const w = this.cyl(0.4, 0.24, this.mats.track, sx, 0.4, 1.5);
         w.rotation.z = Math.PI / 2;
-        g.add(w);
+        const fender = this.box(0.5, 0.07, 1.0, this.mats.hullDark, sx, 0.82, 1.5);
+        g.add(w, fender);
         const tr = this.box(0.3, 0.7, 2.4, this.mats.track, sx, 0.45, -0.8);
         g.add(tr);
+        // rear bogie road wheels
+        for (let i = 0; i < 3; i++) {
+          const rw = this.cyl(0.22, 0.12, this.mats.hullDark, sx * 1.02, 0.4, -1.5 + i * 0.7);
+          rw.rotation.z = Math.PI / 2;
+          g.add(rw);
+        }
       }
     } else {
       const heavy = kind === "panther" || kind === "tiger";
@@ -1582,15 +1814,39 @@ export class Engine {
       hull.castShadow = true;
       const glacis = this.box(tiger ? 2.7 : heavy ? 2.5 : 2.2, 0.7, 1.0, this.mats.hull, 0, 0.95, tiger ? 2.8 : heavy ? 2.6 : 2.3);
       glacis.rotation.x = heavy ? 0.6 : 0.35;
+      const nWheels = tiger ? 8 : heavy ? 7 : 6;
       for (const sx of [-(tiger ? 1.5 : heavy ? 1.35 : 1.2), tiger ? 1.5 : heavy ? 1.35 : 1.2]) {
         const tr = this.box(0.5, 0.9, tiger ? 5.5 : heavy ? 5.1 : 4.5, this.mats.track, sx, 0.52, 0);
-        g.add(tr);
+        const fender = this.box(0.6, 0.07, tiger ? 5.6 : heavy ? 5.2 : 4.6, this.mats.hullDark, sx, 1.0, 0);
+        g.add(tr, fender);
+        // road wheels + drive sprocket + idler
+        for (let i = 0; i < nWheels; i++) {
+          const rw = this.cyl(tiger ? 0.34 : 0.3, 0.12, this.mats.hullDark, sx * (tiger ? 1.06 : 1.03), 0.45, -(tiger ? 2.2 : 1.9) + i * (tiger ? 0.62 : 0.66));
+          rw.rotation.z = Math.PI / 2;
+          g.add(rw);
+        }
+        const sprocket = this.cyl(0.3, 0.14, this.mats.steelDark, sx * 1.04, 0.55, tiger ? 2.55 : 2.15);
+        sprocket.rotation.z = Math.PI / 2;
+        const idler = this.cyl(0.26, 0.12, this.mats.steelDark, sx * 1.04, 0.5, tiger ? -2.55 : -2.15);
+        idler.rotation.z = Math.PI / 2;
+        g.add(sprocket, idler);
       }
       const tur = this.box(tiger ? 2.0 : heavy ? 1.9 : 1.7, tiger ? 0.85 : 0.72, tiger ? 2.3 : heavy ? 2.5 : 2.0, this.mats.hullDark, 0, tiger ? 1.9 : 1.8, -0.25);
       tur.castShadow = true;
+      // gun mantlet at the turret face
+      const mantlet = this.box(tiger ? 1.0 : heavy ? 1.1 : 0.8, tiger ? 0.6 : 0.5, 0.5, this.mats.steelDark, 0, tiger ? 1.88 : 1.78, tiger ? 0.95 : heavy ? 0.9 : 0.7);
       const gun = this.cyl(tiger ? 0.1 : heavy ? 0.08 : 0.07, tiger ? 3.2 : heavy ? 3.4 : 2.5, this.mats.gunmetal, 0, tiger ? 1.95 : 1.85, tiger ? 2.7 : heavy ? 2.5 : 1.9);
       gun.rotation.x = Math.PI / 2;
-      g.add(hull, glacis, tur, gun);
+      // rear deck: exhaust pipes + jerry cans + tow cable loops
+      const exL = this.cyl(0.1, 0.9, this.mats.steelDark, -(tiger ? 0.7 : 0.6), 1.25, tiger ? -2.4 : heavy ? -2.2 : -1.9);
+      const exR = this.cyl(0.1, 0.9, this.mats.steelDark, tiger ? 0.7 : 0.6, 1.25, tiger ? -2.4 : heavy ? -2.2 : -1.9);
+      const jerry = this.box(0.4, 0.45, 0.18, this.mats.oliveDark, tiger ? -1.1 : -0.95, 1.5, tiger ? -1.0 : -0.8);
+      g.add(hull, glacis, tur, mantlet, gun, exL, exR, jerry);
+      if (!tiger) {
+        const brake = this.cyl(heavy ? 0.12 : 0.1, heavy ? 0.3 : 0.22, this.mats.steelDark, 0, heavy ? 1.85 : 1.85, heavy ? 4.05 : 3.0);
+        brake.rotation.x = Math.PI / 2;
+        g.add(brake);
+      }
       if (tiger) {
         // muzzle brake + commander's cupola
         const brake = this.cyl(0.16, 0.4, this.mats.steelDark, 0, 1.95, 4.3);
@@ -1615,7 +1871,7 @@ export class Engine {
       falling: false, fallVy: 0, hpBar: null,
       phase: rand(0, 2.2), bombs: kind === "heinkel" ? 3 : 0, strafeT: rand(0.4, 1.2),
       armorMul: 1 + (this.waveHpMul - 1) * 0.5,
-      burnT: 0, markT: 0, markMul: 1,
+      burnT: 0, markT: 0, markMul: 1, supT: 0,
     };
     if (kind === "stuka") {
       e.pos.set(-100, 27, rand(-42, 42));
@@ -1708,7 +1964,7 @@ export class Engine {
       dmg: def.dmg * t.dmgMul * (manual ? 1.35 : 1), pen: def.pen * t.penMul,
       splash: def.splash * (def.kind === "flak" || def.kind === "arty" ? t.splashMul : 1),
       splashDmg: def.splashDmg * (def.kind === "flak" || def.kind === "arty" ? t.splashMul : 1) * (manual ? 1.35 : 1),
-      kind, life: 4, manual, dead: false,
+      kind, life: 4, manual, dead: false, sup: def.kind === "mg",
     };
     this.projs.push(p);
     if (this.projs.length > 150) {
@@ -1865,6 +2121,24 @@ export class Engine {
   }
 
   private ringPulses: { mesh: THREE.Mesh; life: number }[] = [];
+  // signature 8.8cm airburst: black smoke puffball with a white flash ring
+  private flakBurst(pos: THREE.Vector3) {
+    for (let i = 0; i < 10; i++) {
+      this.spawnSmoke(
+        pos.clone().add(new THREE.Vector3(rand(-1.6, 1.6), rand(-1.2, 1.2), rand(-1.6, 1.6))),
+        new THREE.Vector3(rand(-3, 3), rand(-1, 2.4), rand(-3, 3)),
+        rand(1.6, 2.4), rand(1.8, 2.8), 0.13, 2.6,
+      );
+    }
+    this.spawnSpark(pos, new THREE.Vector3(0, 0, 0), 0.4, 2.6, new THREE.Color(1, 0.97, 0.9), 0);
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      this.spawnSpark(pos, new THREE.Vector3(Math.cos(a) * 14, rand(-3, 3), Math.sin(a) * 14), 0.35, 0.4, new THREE.Color(1, 0.85, 0.5), 0);
+    }
+    this.spawnRingPulse(pos, 0xffffff);
+    this.flashAt(pos, 42);
+  }
+
   private spawnRingPulse(pos: THREE.Vector3, color: number) {
     const m = new THREE.Mesh(
       new THREE.RingGeometry(0.6, 0.9, 32),
@@ -2004,7 +2278,7 @@ export class Engine {
       this.projs.push({
         mesh, pos, vel: new THREE.Vector3(rand(-2, 2), -34, rand(-2, 2)),
         dmg: 72, pen: 999, splash: 5, splashDmg: 72, kind: "arty",
-        life: 6, manual: false, dead: false,
+        life: 6, manual: false, dead: false, sup: false,
       });
     }
     this.startAbility(null);
@@ -2342,8 +2616,11 @@ export class Engine {
       const e = this.enemies[i];
       if (e.dead) { this.enemies.splice(i, 1); continue; }
       e.flashT = Math.max(0, e.flashT - dt);
+      e.supT = Math.max(0, e.supT - dt);
       const pulse = e.flashT > 0 ? 1.07 : 1;
       e.group.scale.setScalar(pulse);
+      // pinned infantry drops to the dirt
+      if (e.supT > 0 && e.kind === "infantry") e.group.scale.y = pulse * 0.55;
       e.markT = Math.max(0, e.markT - dt);
 
       // napalm burn damage-over-time (flamethrower)
@@ -2419,9 +2696,11 @@ export class Engine {
       const prev = e.pos.clone();
       // infantry advances in bounding-overwatch rushes; vehicles keep column spacing
       let gait = 1;
+      // MG suppression pins the target to the ground
+      if (e.supT > 0 && (e.kind === "infantry" || e.kind === "bike")) gait = Math.min(gait, 0.4);
       if (e.kind === "infantry") {
         const cyc = (this.playT + e.phase) % 2.2;
-        gait = cyc < 1.4 ? 1.45 : 0.12;
+        gait = Math.min(gait, cyc < 1.4 ? 1.45 : 0.12);
       } else {
         for (const o of this.enemies) {
           if (o === e || o.dead || o.flying || o.kind === "infantry" || o.kind === "bike") continue;
@@ -2450,8 +2729,9 @@ export class Engine {
       e.group.rotation.y = e.heading;
 
       if (e.kind === "infantry") {
+        const bob = e.supT > 0 ? 0 : 1; // pinned flat under fire
         for (let k = 0; k < e.soldiers.length; k++) {
-          e.soldiers[k].position.y = Math.abs(Math.sin(this.playT * 9 + k * 1.7)) * 0.12 * slow;
+          e.soldiers[k].position.y = Math.abs(Math.sin(this.playT * 9 + k * 1.7)) * 0.12 * slow * bob;
         }
       }
       if (e.hpBar) {
@@ -2495,7 +2775,7 @@ export class Engine {
       this.dyn.add(bomb);
       this.projs.push({
         mesh: bomb, pos: bpos, vel: new THREE.Vector3((dx / (dist || 1)) * sp * 0.55, -2, (dz / (dist || 1)) * sp * 0.55),
-        dmg: 135, pen: 999, splash: 6, splashDmg: 135, kind: "bomb", life: 8, manual: false, dead: false,
+        dmg: 135, pen: 999, splash: 6, splashDmg: 135, kind: "bomb", life: 8, manual: false, dead: false, sup: false,
       });
     }
     // MG strafing pass on the way in
@@ -2553,7 +2833,7 @@ export class Engine {
         this.dyn.add(bomb);
         this.projs.push({
           mesh: bomb, pos: bpos, vel: new THREE.Vector3(-sp * 0.5, -4, 0),
-          dmg: 120, pen: 999, splash: 5.5, splashDmg: 120, kind: "bomb", life: 8, manual: false, dead: false,
+          dmg: 120, pen: 999, splash: 5.5, splashDmg: 120, kind: "bomb", life: 8, manual: false, dead: false, sup: false,
         });
       }
     }
@@ -2823,6 +3103,7 @@ export class Engine {
           const closest = prev.clone().addScaledVector(seg, tt);
           if (closest.distanceTo(e.pos) < 3.8) {
             this.explode(p.pos, p.splash + 1.5, p.splashDmg, { big: false });
+            this.flakBurst(p.pos);
             this.damageEnemy(e, p.dmg, p.pen, e.pos, p.vel);
             hit = true;
             break;
@@ -2839,7 +3120,7 @@ export class Engine {
           const closest = prev.clone().addScaledVector(seg, tt);
           if (Math.abs(e.pos.y - closest.y) < r + 1.2 && closest.distanceTo(e.pos) < r) {
             if (p.splash > 0) this.explode(p.pos, p.splash, p.splashDmg, {});
-            this.damageEnemy(e, p.dmg, p.pen, p.pos, p.vel);
+            this.damageEnemy(e, p.dmg, p.pen, p.pos, p.vel, p.sup);
             hit = true;
             break;
           }
