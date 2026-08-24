@@ -139,7 +139,7 @@ export class Engine {
   private craterTex!: THREE.Texture;
   private gibs: Gib[] = [];
   private gibGeos: THREE.BoxGeometry[] = [];
-  private gibMats: THREE.MeshLambertMaterial[] = [];
+  private gibColors = [0x4a4f38, 0x3a3e2c, 0x2c2e24, 0x57503a];
   private sparkTex!: THREE.Texture;
   private smokeTex!: THREE.Texture;
 
@@ -602,9 +602,6 @@ export class Engine {
       new THREE.BoxGeometry(0.85, 0.25, 0.4),
       new THREE.BoxGeometry(0.32, 0.32, 0.32),
     ];
-    this.gibMats = [0x4a4f38, 0x3a3e2c, 0x2c2e24, 0x57503a].map(
-      (c) => new THREE.MeshLambertMaterial({ color: c, transparent: true }),
-    );
     for (let i = 0; i < 90; i++) {
       const mat = new THREE.MeshLambertMaterial({ color: 0x4a4f38, transparent: true, opacity: 0 });
       const mesh = new THREE.Mesh(this.gibGeos[i % this.gibGeos.length], mat);
@@ -683,7 +680,8 @@ export class Engine {
       let g = this.gibs.find((x) => x.life <= 0);
       if (!g) g = this.gibs.reduce((a, b) => (a.life < b.life ? a : b));
       g.mesh.visible = true;
-      g.mesh.material = this.gibMats[Math.floor(rand(0, this.gibMats.length))];
+      const mat = g.mesh.material as THREE.MeshLambertMaterial;
+      mat.color.setHex(this.gibColors[Math.floor(rand(0, this.gibColors.length))]);
       g.pos.set(e.pos.x + rand(-1, 1), e.pos.y + rand(0.6, 2.2), e.pos.z + rand(-1, 1));
       const a = rand(0, Math.PI * 2);
       const sp = rand(0.35, 1) * power;
