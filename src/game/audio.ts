@@ -3,7 +3,7 @@
 export type SfxName =
   | "mg" | "cannon" | "flakShot" | "boom" | "boomBig" | "ricochet" | "clang"
   | "build" | "denied" | "coin" | "siren" | "whistle" | "reload" | "horn"
-  | "tinnitus" | "click" | "alarm" | "sell" | "upgrade";
+  | "tinnitus" | "click" | "alarm" | "sell" | "upgrade" | "flyby";
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -150,6 +150,10 @@ export class Sfx {
       case "upgrade":
         this.tone(0.1, 520, 780, 0.14, "square");
         this.tone(0.14, 780, 1180, 0.12, "square", 0.1);
+        break;
+      case "flyby":
+        this.tone(1.0, 230, 85, 0.16, "sawtooth");
+        this.noise(1.0, 750, 0.22, "bandpass");
         break;
     }
   }

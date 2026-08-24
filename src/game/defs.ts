@@ -1,6 +1,6 @@
 // ── Steel & Tactics — data definitions ──────────────────────────────────────
 
-export type TowerKind = "mg" | "at" | "flak" | "arty" | "hedgehog" | "wire" | "mines";
+export type TowerKind = "mg" | "at" | "flak" | "arty" | "airpost" | "hedgehog" | "wire" | "mines";
 export type EnemyKind = "infantry" | "bike" | "scout" | "halftrack" | "panzer" | "stug" | "panther" | "tiger" | "stuka" | "heinkel";
 
 export interface UpgradeDef { name: string; desc: string; cost: number }
@@ -28,7 +28,7 @@ export interface TowerDef {
   upgrades: UpgradeDef[];
 }
 
-export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "arty", "hedgehog", "wire", "mines"];
+export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "arty", "airpost", "hedgehog", "wire", "mines"];
 
 export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   mg: {
@@ -71,20 +71,30 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
       { name: "FDC FIRE CONTROL", desc: "+25% range, +35% fire rate", cost: 330 },
     ],
   },
+  airpost: {
+    kind: "airpost", name: "P-47D CAS POST", short: "AIR POST", hotkey: "5",
+    cost: 700, hp: 140, range: 62, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
+    projSpeed: 0, lob: 0, ammo: 6, antiAir: false, structure: false, traverse: 0, minRange: 0,
+    upgrades: [
+      { name: "ROCKET RAILS", desc: "Each pass fires 2 HE rockets at armor", cost: 380 },
+      { name: "VETERAN PILOT", desc: "Sorties 45% more frequent", cost: 300 },
+      { name: "SECTION OF TWO", desc: "A second Thunderbolt joins the post", cost: 520 },
+    ],
+  },
   hedgehog: {
-    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "5",
+    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "6",
     cost: 40, hp: 90, range: 3.2, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
     projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   wire: {
-    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "6",
+    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "7",
     cost: 30, hp: 45, range: 3.6, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
     projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   mines: {
-    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "7",
+    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "8",
     cost: 90, hp: 30, range: 4.6, rof: 0, dmg: 75, pen: 999, splash: 4.6, splashDmg: 75,
     projSpeed: 0, lob: 0, ammo: 3, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],

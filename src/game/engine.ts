@@ -57,6 +57,10 @@ interface Tower {
   targetMode: number; target: Enemy | null; recoil: number; flashT: number;
   elev: number;
   dead: boolean; invested: number; hpBar: THREE.Group | null;
+  // CAS post state (airpost only)
+  airT: number; airPhase: number; airRunT: number; airGone: boolean; airActive: number;
+  airPlane: THREE.Group | null; airPlane2: THREE.Group | null;
+  airA: THREE.Vector3; airB: THREE.Vector3; airTick: number; airRocketed: number; airSnd: number;
 }
 interface Enemy {
   id: number; kind: EnemyKind; def: EnemyDef;
@@ -858,6 +862,7 @@ export class Engine {
       this.explode(t.pos.clone().setY(t.pos.y + 1.2), 4.5, 0, { big: true });
       this.dyn.remove(t.group);
       this.dyn.remove(t.hitMesh);
+      this.clearAirPost(t);
       const rubble = new THREE.Group();
       for (let i = 0; i < 5; i++) {
         const b = this.box(rand(0.6, 1.4), rand(0.3, 0.8), rand(0.6, 1.4), Math.random() < 0.5 ? this.mats.burnt : this.mats.burntDark, rand(-1.4, 1.4), rand(0.15, 0.4), rand(-1.4, 1.4));
@@ -1030,6 +1035,27 @@ export class Engine {
       turret.add(load, soldier(-1.6, -0.9), soldier(0, -2.0));
       group.add(turret);
       loader = load;
+    } else if (kind === "airpost") {
+      // forward air-control post: sandbag ring, radio mast, signal panels
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const bag = this.box(1.0, 0.4, 0.55, this.mats.sandbag, Math.cos(a) * 1.7, 0.2, Math.sin(a) * 1.7);
+        bag.rotation.y = -a;
+        group.add(bag);
+      }
+      group.add(this.cyl(1.4, 0.14, this.mats.dirt, 0, 0.07, 0));
+      // radio mast with crossbars + beacon
+      group.add(this.cyl(0.06, 5.4, this.mats.steelDark, -1.1, 2.7, -0.9));
+      for (const yy of [3.6, 4.4]) {
+        group.add(this.box(1.3, 0.05, 0.05, this.mats.steelDark, -1.1, yy, -0.9));
+      }
+      group.add(this.box(0.22, 0.22, 0.22, this.mats.red, -1.1, 5.5, -0.9));
+      // orange signal panel with stripe (air recognition)
+      const panel = this.box(1.5, 0.06, 1.1, this.mats.planeAccent, 1.3, 0.28, 0.6);
+      panel.rotation.z = 0.12;
+      group.add(panel);
+      group.add(this.box(0.5, 0.07, 1.12, this.mats.barRed, 1.3, 0.34, 0.6));
+      group.add(soldier(-0.2, 0.6), soldier(0.7, -0.5));
     } else if (kind === "hedgehog") {
       for (let i = 0; i < 3; i++) {
         const beam = this.box(0.3, 0.3, 3.4, this.mats.steel, 0, 0.9, 0);
@@ -1139,13 +1165,200 @@ export class Engine {
       targetMode: 0, target: null, recoil: 0, flashT: 0,
       elev: kind === "flak" ? 0.55 : kind === "arty" ? 1.05 : 0,
       dead: false, invested: def.cost, hpBar: null,
+      airT: 4, airPhase: 0, airRunT: 0, airGone: false, airActive: 0,
+      airPlane: null, airPlane2: null,
+      airA: new THREE.Vector3(), airB: new THREE.Vector3(),
+      airTick: 0, airRocketed: 0, airSnd: 0,
     };
+    if (kind === "airpost") {
+      t.airPlane = this.makeFriendlyPlane();
+      this.dyn.add(t.airPlane as THREE.Group);
+    }
     this.towers.push(t);
     sfx.play("build");
     this.burst(new THREE.Vector3(x, y + 0.4, z), 10, 6, 0.5, 0.7, new THREE.Color(0.55, 0.48, 0.32), 9);
     for (let i = 0; i < 3; i++) this.spawnSmoke(new THREE.Vector3(x + rand(-1, 1), y + 0.4, z + rand(-1, 1)), new THREE.Vector3(0, 1.6, 0), 0.9, 1.1, 0.55);
     this.pushHud();
     return true;
+  }
+
+  // ── close air support (airpost) ───────────────────────────────────────────
+  private makeFriendlyPlane(): THREE.Group {
+    const g = new THREE.Group();
+    const star = new THREE.MeshLambertMaterial({ color: 0xe4e6d8 });
+    const fuse = this.box(0.95, 1.05, 5.6, this.mats.olive, 0, 0, 0);
+    fuse.castShadow = true;
+    const nose = this.cyl(0.44, 1.1, this.mats.gunmetal, 0, 0, 3.1);
+    nose.rotation.x = Math.PI / 2;
+    const canopy = this.box(0.62, 0.5, 1.3, this.mats.gunmetal, 0, 0.72, 0.4);
+    const wing = this.box(7.8, 0.15, 2.15, this.mats.olive, 0, -0.18, 0.5);
+    wing.castShadow = true;
+    const tail = this.box(3.1, 0.11, 1.25, this.mats.olive, 0, 0.18, -2.5);
+    const fin = this.box(0.13, 1.3, 1.25, this.mats.olive, 0, 0.88, -2.5);
+    // wing roundels
+    const starL = this.box(0.95, 0.03, 0.95, star, -2.4, -0.08, 0.5);
+    const starR = this.box(0.95, 0.03, 0.95, star, 2.4, -0.08, 0.5);
+    // stub rocket rails
+    const railL = this.box(0.12, 0.12, 1.5, this.mats.steelDark, -1.6, -0.42, 0.5);
+    const railR = this.box(0.12, 0.12, 1.5, this.mats.steelDark, 1.6, -0.42, 0.5);
+    g.add(fuse, nose, canopy, wing, tail, fin, starL, starR, railL, railR);
+    g.traverse((o) => { if ((o as THREE.Mesh).isMesh) o.castShadow = true; });
+    return g;
+  }
+
+  private clearAirPost(t: Tower) {
+    if (t.airPlane) { this.dyn.remove(t.airPlane); t.airPlane = null; }
+    if (t.airPlane2) { this.dyn.remove(t.airPlane2); t.airPlane2 = null; }
+  }
+
+  private findAirTarget(t: Tower): { a: THREE.Vector3; b: THREE.Vector3 } | null {
+    let best: Enemy | null = null;
+    let bestScore = 0;
+    for (const e of this.enemies) {
+      if (e.dead || e.flying || e.falling) continue;
+      if (e.pos.distanceTo(t.pos) > t.def.range * t.rangeMul + 10) continue;
+      let score = e.def.radius * 2;
+      for (const o of this.enemies) {
+        if (o === e || o.dead || o.flying || o.falling) continue;
+        if (Math.hypot(o.pos.x - e.pos.x, o.pos.z - e.pos.z) < 9) score += o.def.radius;
+      }
+      if (score > bestScore) { bestScore = score; best = e; }
+    }
+    if (!best || bestScore < 3) return null;
+    const s = this.pathPoint(best.dist);
+    const tan = new THREE.Vector3(s.dx, 0, s.dz);
+    const c = new THREE.Vector3(best.pos.x, 0, best.pos.z);
+    return { a: c.clone().addScaledVector(tan, -22), b: c.clone().addScaledVector(tan, 22) };
+  }
+
+  private updateAirPost(t: Tower, dt: number) {
+    const secondPlane = t.tier >= 3;
+    if (secondPlane && !t.airPlane2) {
+      t.airPlane2 = this.makeFriendlyPlane();
+      this.dyn.add(t.airPlane2 as THREE.Group);
+    }
+    const planes = [t.airPlane, t.airPlane2].filter(Boolean) as THREE.Group[];
+
+    // out of sorties → planes hold away
+    if (t.ammo <= 0) {
+      if (!t.airGone) {
+        t.airGone = true;
+        for (const p of planes) p.visible = false;
+      }
+      return;
+    }
+    if (t.airGone) {
+      t.airGone = false;
+      for (const p of planes) p.visible = true;
+    }
+
+    const orbitY = 27;
+    const nPlanes = secondPlane ? 2 : 1;
+    // orbiting planes (all except the one currently on a run)
+    for (let pi = 0; pi < nPlanes; pi++) {
+      const p = planes[pi];
+      if (!p || (t.airPhase === 1 && t.airActive === pi)) continue;
+      const ang = this.playT * 0.5 + pi * Math.PI;
+      p.position.set(
+        t.pos.x + Math.cos(ang) * 15,
+        orbitY + Math.sin(this.playT * 1.3 + pi) * 0.6,
+        t.pos.z + Math.sin(ang) * 15,
+      );
+      p.rotation.set(0, -ang, -0.3);
+    }
+
+    // sortie timer
+    t.airT -= dt * t.rofMul;
+    if (t.airPhase === 0 && t.airT <= 0) {
+      const spot = this.findAirTarget(t);
+      if (!spot) {
+        t.airT = 1.6;
+      } else {
+        t.ammo--;
+        t.airPhase = 1;
+        t.airRunT = 0;
+        t.airTick = 0;
+        t.airRocketed = 0;
+        t.airSnd = 0;
+        t.airActive = secondPlane ? 1 - t.airActive : 0;
+        t.airA.copy(spot.a);
+        t.airB.copy(spot.b);
+        sfx.play("flyby");
+        this.pushHud();
+      }
+    }
+
+    if (t.airPhase === 1) {
+      const p = (t.airActive === 0 ? t.airPlane : t.airPlane2) as THREE.Group | null;
+      if (!p) { t.airPhase = 0; t.airT = 5; return; }
+      t.airRunT += dt;
+      const dur = 3.6;
+      const k = clamp(t.airRunT / dur, 0, 1);
+      const A11 = new THREE.Vector3(t.airA.x, 11.5, t.airA.z);
+      const B11 = new THREE.Vector3(t.airB.x, 11.5, t.airB.z);
+      const back = new THREE.Vector3().subVectors(t.airA, t.airB).normalize();
+      const E = A11.clone().addScaledVector(back, 20); E.y = 24;
+      const F = B11.clone().addScaledVector(back, -24); F.y = 27;
+      let pos = new THREE.Vector3();
+      let pitch = 0;
+      if (k < 0.18) {
+        const u = k / 0.18;
+        pos.lerpVectors(E, A11, u);
+        pitch = 0.18;
+      } else if (k < 0.82) {
+        const u = (k - 0.18) / 0.64;
+        pos.lerpVectors(A11, B11, u);
+        pitch = 0.07;
+        this.airStrafe(t, p, pos, dt, u);
+      } else {
+        const u = (k - 0.82) / 0.18;
+        pos.lerpVectors(B11, F, u);
+        pitch = -0.25;
+      }
+      p.position.copy(pos);
+      const heading = Math.atan2(t.airB.x - t.airA.x, t.airB.z - t.airA.z);
+      p.rotation.set(pitch, heading, 0);
+      if (k >= 1) {
+        t.airPhase = 0;
+        t.airT = 13;
+        this.pushHud();
+      }
+    }
+  }
+
+  private airStrafe(t: Tower, p: THREE.Group, pos: THREE.Vector3, dt: number, u: number) {
+    t.airTick -= dt;
+    while (t.airTick <= 0) {
+      t.airTick += 0.065;
+      // wing tracers
+      for (const sx of [-1.6, 1.6]) {
+        this.spawnSpark(
+          pos.clone().add(new THREE.Vector3(sx, -0.3, 0)),
+          new THREE.Vector3(rand(-2, 2), -30, rand(-2, 2)),
+          0.22, 0.35, new THREE.Color(1, 0.85, 0.45), 20,
+        );
+      }
+      // gun burst audio
+      t.airSnd -= 0.065;
+      if (t.airSnd <= 0) { t.airSnd = 0.13; sfx.play("mg"); }
+      // damage enemies near the gun line
+      for (const e of this.enemies) {
+        if (e.dead || e.flying || e.falling) continue;
+        const dx = e.pos.x - pos.x, dz = e.pos.z - pos.z;
+        if (Math.hypot(dx, dz) < 2.6) {
+          this.damageEnemy(e, 8, 28, e.pos, new THREE.Vector3(dx, -0.5, dz));
+        }
+      }
+      this.addShake(0.025);
+    }
+    // rocket rails (tier 1+): two HE rockets per pass
+    if (t.tier >= 1 && t.airRocketed < 2 && u > 0.35 + 0.3 * t.airRocketed) {
+      t.airRocketed++;
+      const gp = new THREE.Vector3(pos.x, 0.5, pos.z);
+      this.explode(gp, 4.6, 85, { big: false, crater: 0.9 });
+      sfx.play("cannon");
+      this.burst(gp, 10, 10, 0.4, 0.8, new THREE.Color(1, 0.8, 0.4), 12);
+    }
   }
 
   // ── enemies ───────────────────────────────────────────────────────────────
@@ -1515,6 +1728,7 @@ export class Engine {
   private manualFire(point: THREE.Vector3) {
     const t = this.selected;
     if (!t) return;
+    if (t.kind === "airpost") return; // CAS acts autonomously
     const dist = t.pos.distanceTo(point);
     const range = t.def.range * t.rangeMul;
     if (dist > range * 1.06) {
@@ -1743,6 +1957,9 @@ export class Engine {
       if (t.tier === 0) { t.splashMul *= 1.6; }
       else if (t.tier === 1) { t.maxHp += 180; t.hp = t.maxHp; }
       else { t.rangeMul *= 1.25; t.rofMul *= 1.35; }
+    } else if (t.kind === "airpost") {
+      // tier0 → rocket rails (fired once tier >= 1), tier1 → veteran pilot, tier2 → second plane
+      if (t.tier === 1) { t.rofMul *= 1.45; }
     }
     t.tier++;
     sfx.play("upgrade");
@@ -1782,6 +1999,7 @@ export class Engine {
     sfx.play("sell");
     this.dyn.remove(t.group);
     this.dyn.remove(t.hitMesh);
+    this.clearAirPost(t);
     t.dead = true;
     this.towers = this.towers.filter((x) => x !== t);
     this.deselect();
@@ -2211,6 +2429,7 @@ export class Engine {
       }
       t.group.scale.setScalar(t.flashT > 0 ? 1.05 : 1);
 
+      if (t.kind === "airpost") { this.updateAirPost(t, dt); continue; }
       if (t.def.structure) continue;
       if (t.hpBar) {
         const pct = clamp(t.hp / t.maxHp, 0, 1);

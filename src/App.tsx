@@ -67,6 +67,7 @@ const ICONS: Record<string, React.ReactNode> = {
   wire: (<Icon><circle cx="5.5" cy="14" r="2.6" /><circle cx="12" cy="12" r="2.6" /><circle cx="18.5" cy="14" r="2.6" /><path d="M2 20h20" /></Icon>),
   mines: (<Icon><circle cx="12" cy="14" r="5" /><path d="M12 5v4M5 9.5l3.4 1.8M19 9.5l-3.4 1.8" /><path d="M4 21h16" /></Icon>),
   arty: (<Icon><path d="M3 20c6-1 11-6 13-14" /><path d="M14.5 4.5L19 3l-1.5 4.5" /><path d="M2 21h20" /></Icon>),
+  airpost: (<Icon><path d="M12 2l2 8 8 3-8 1.5L12 22l-2-7.5L2 13l8-3z" /></Icon>),
   truck: (<Icon><path d="M1 16V7h11v9" /><path d="M12 10h6l3 3v3h-3" /><circle cx="6" cy="17" r="1.8" /><circle cx="16.5" cy="17" r="1.8" /><path d="M8 16h6" /></Icon>),
   pause: (<Icon><path d="M9 5v14M15 5v14" /></Icon>),
   play: (<Icon><path d="M7 4l13 8-13 8z" /></Icon>),
@@ -259,24 +260,30 @@ export default function App() {
                 {!sel.structure && sel.maxAmmo > 0 && (
                   <div>
                     <div className="flex justify-between text-[var(--dim)]">
-                      <span>AMMUNITION</span>
+                      <span>{sel.kind === "airpost" ? "SORTIES" : "AMMUNITION"}</span>
                       <span className={`hud-num ${sel.ammo === 0 ? "pulse-warn" : "text-[var(--paper)]"}`}>{sel.ammo}/{sel.maxAmmo}</span>
                     </div>
                     <Bar pct={sel.ammo / sel.maxAmmo} cls="amber" />
                     {sel.ammo / sel.maxAmmo < 0.32 && !sel.carrier && (
-                      <div className="mt-0.5 text-[9px] tracking-widest text-[var(--dim)]">CARRIER QUEUED AT HQ…</div>
+                      <div className="mt-0.5 text-[9px] tracking-widest text-[var(--dim)]">
+                        {sel.kind === "airpost" ? "REFUEL TRUCK QUEUED AT HQ…" : "CARRIER QUEUED AT HQ…"}
+                      </div>
                     )}
                     {sel.carrier && (
                       <div className="mt-0.5 flex items-center gap-1 text-[9px] font-bold tracking-widest text-[var(--olive)]">
                         <span className="inline-block h-1.5 w-1.5 animate-pulse bg-[var(--olive)]" />
-                        AMMUNITION CARRIER EN ROUTE
+                        {sel.kind === "airpost" ? "REFUEL TRUCK EN ROUTE" : "AMMUNITION CARRIER EN ROUTE"}
                       </div>
                     )}
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[var(--dim)]">
                   <span>RANGE</span><span className="hud-num text-right text-[var(--paper)]">{sel.range} m</span>
-                  {sel.minRange > 0 ? (
+                  {sel.kind === "airpost" ? (
+                    <>
+                      <span>MODE</span><span className="hud-num text-right text-[var(--olive)]">AUTONOMOUS</span>
+                    </>
+                  ) : sel.minRange > 0 ? (
                     <>
                       <span className="text-[var(--red-hi)]">DEAD ZONE</span>
                       <span className="hud-num text-right text-[var(--red-hi)]">&lt; {sel.minRange} m</span>
@@ -287,11 +294,15 @@ export default function App() {
                     </>
                   )}
                 </div>
-                {sel.minRange > 0 && (
+                {sel.kind === "airpost" ? (
+                  <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
+                    THUNDERBOLT LOITERS OVERHEAD &amp; STRAFES ENEMY GROUPS
+                  </div>
+                ) : sel.minRange > 0 ? (
                   <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
                     LONG-RANGE PIECE — WILL NOT ENGAGE INSIDE {sel.minRange} m
                   </div>
-                )}
+                ) : null}
               </div>
               <div className="mt-3 space-y-1.5">
                 {sel.upgradeName && (
@@ -301,7 +312,7 @@ export default function App() {
                 )}
                 {sel.upgradeName && <div className="-mt-1 px-1 text-[9px] text-[var(--dim)]">{sel.upgradeDesc}</div>}
                 {!sel.upgradeName && !sel.structure && <div className="text-center text-[10px] tracking-widest text-[var(--olive)]">FULLY UPGRADED</div>}
-                {!sel.structure && (
+                {!sel.structure && sel.kind !== "airpost" && (
                   <>
                     <button className="btn w-full py-1.5 text-[10px]" onClick={() => eng()?.cycleTargetMode()}>
                       TARGETING: {sel.targetMode} [T]
