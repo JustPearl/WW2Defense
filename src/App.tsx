@@ -151,7 +151,7 @@ export default function App() {
   const eng = () => engRef.current;
   const { hud, sel } = ui;
   const inGame = ui.screen === "playing" || ui.screen === "paused";
-  const nextWave = hud.wave < WAVES.length ? WAVES[hud.wave] : null;
+  const nextWave = ui.screen === "menu" ? null : eng()?.nextWaveInfo() ?? (hud.wave < WAVES.length ? WAVES[hud.wave] : null);
   const cursorArmed = ui.build !== null || ui.ability !== null;
 
   return (
@@ -208,7 +208,7 @@ export default function App() {
             ) : (
               <div className="panel-flat px-5 py-2 text-center">
                 <div className="text-[10px] tracking-[0.25em] text-[var(--dim)]">
-                  WAVE <span className="text-[var(--amber)]">{Math.max(1, hud.wave)}</span> / {hud.waveTotal}
+                  WAVE <span className="text-[var(--amber)]">{Math.max(1, hud.wave)}</span> <span className="text-[var(--dim)]">/ ∞</span>
                 </div>
                 <div className="font-display text-xl leading-tight text-[var(--red-hi)]">
                   HOSTILES REMAINING: <span className="hud-num">{hud.hostiles}</span>
@@ -398,9 +398,9 @@ export default function App() {
               <div className="mt-2 text-sm font-bold tracking-[0.3em] text-[var(--paper)]">WW2 DEFENSIVE OPERATIONS</div>
               <div className="mt-5 max-w-xl border-l-2 border-[var(--line-hi)] pl-4 text-[12px] leading-relaxed text-[var(--dim)]">
                 Commander — armored columns are massing on the western road. Requisition emplacements,
-                wire the approaches, and hold the HQ through <span className="text-[var(--amber)]">10 assault waves</span>.
-                Every shell is a physical object: flank armor to penetrate, watch your ammunition,
-                and keep the supply trucks rolling.
+                wire the approaches, and hold the HQ against <span className="text-[var(--amber)]">endless assault waves</span>.
+                Every shell is a physical object: flank armor to penetrate, and let the ammunition
+                carriers keep your guns fed.
               </div>
               <div className="mt-7 flex flex-wrap items-center gap-4">
                 <button className="btn btn-big" onClick={() => eng()?.startGame()}>
@@ -435,9 +435,11 @@ export default function App() {
               <div className="panel p-4">
                 <div className="stencil-head mb-2 text-[12px]">ENEMY INTEL</div>
                 <div className="space-y-1 text-[11px] text-[var(--dim)]">
-                  <div><span className="text-[var(--paper)]">INFANTRY</span> — shredded by MG fire and wire.</div>
-                  <div><span className="text-[var(--paper)]">PANZERS</span> — thick frontal armor. Hit the flanks.</div>
-                  <div><span className="text-[var(--paper)]">STUKAS</span> — dive-bomb your priciest guns. Flak kills them.</div>
+                  <div><span className="text-[var(--paper)]">INFANTRY</span> — advance in rushes. Shredded by MG fire and wire.</div>
+                  <div><span className="text-[var(--paper)]">BIKES</span> — fast dispatch riders. Catch them before they close.</div>
+                  <div><span className="text-[var(--paper)]">PANZERS &amp; STUGS</span> — thick frontal plates. Hit the flanks.</div>
+                  <div><span className="text-[var(--paper)]">TIGERS</span> — near-immune frontally. Bring the 88 or the howitzer.</div>
+                  <div><span className="text-[var(--paper)]">STUKAS &amp; BOMBERS</span> — only the Flak 88 reaches them. Set AIR priority.</div>
                 </div>
               </div>
             </div>

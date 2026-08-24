@@ -1,7 +1,7 @@
 // ── Steel & Tactics — data definitions ──────────────────────────────────────
 
 export type TowerKind = "mg" | "at" | "flak" | "arty" | "hedgehog" | "wire" | "mines";
-export type EnemyKind = "infantry" | "scout" | "halftrack" | "panzer" | "panther" | "stuka";
+export type EnemyKind = "infantry" | "bike" | "scout" | "halftrack" | "panzer" | "stug" | "panther" | "tiger" | "stuka" | "heinkel";
 
 export interface UpgradeDef { name: string; desc: string; cost: number }
 
@@ -112,7 +112,11 @@ export const ENEMY_DEFS: Record<EnemyKind, EnemyDef> = {
   halftrack: { kind: "halftrack", name: "Sd.Kfz Half-track", hp: 170, speed: 6.0, armorF: 26, armorS: 13, armorR: 9, reward: 38, baseDmg: 2, radius: 1.6, flying: false, scale: 1 },
   panzer: { kind: "panzer", name: "Panzer IV", hp: 330, speed: 4.3, armorF: 55, armorS: 30, armorR: 18, reward: 62, baseDmg: 3, radius: 1.9, flying: false, scale: 1 },
   panther: { kind: "panther", name: "Panther Ausf. G", hp: 560, speed: 3.9, armorF: 92, armorS: 46, armorR: 26, reward: 95, baseDmg: 4, radius: 2.1, flying: false, scale: 1.12 },
+  tiger: { kind: "tiger", name: "Tiger I Ausf. E", hp: 860, speed: 3.1, armorF: 128, armorS: 70, armorR: 52, reward: 150, baseDmg: 6, radius: 2.4, flying: false, scale: 1.22 },
+  stug: { kind: "stug", name: "StuG III Ausf. G", hp: 260, speed: 5.2, armorF: 96, armorS: 34, armorR: 22, reward: 46, baseDmg: 3, radius: 1.7, flying: false, scale: 1 },
+  bike: { kind: "bike", name: "Dispatch Rider", hp: 26, speed: 13.0, armorF: 0, armorS: 0, armorR: 0, reward: 10, baseDmg: 1, radius: 0.8, flying: false, scale: 1 },
   stuka: { kind: "stuka", name: "Ju 87 Stuka", hp: 85, speed: 13.5, armorF: 4, armorS: 4, armorR: 4, reward: 70, baseDmg: 0, radius: 1.6, flying: true, scale: 1 },
+  heinkel: { kind: "heinkel", name: "He 111 Bomber", hp: 230, speed: 16.0, armorF: 4, armorS: 4, armorR: 4, reward: 110, baseDmg: 0, radius: 2.8, flying: true, scale: 1 },
 };
 
 export interface WaveEntry { kind: EnemyKind; count: number; gap: number; delay: number }
@@ -188,15 +192,37 @@ export const WAVES: WaveDef[] = [
     ],
   },
   {
-    label: "FINAL ASSAULT", intel: "Everything they have left. Hold the line.",
+    label: "TANK HUNTERS", intel: "StuG assault guns — thick frontal plates. Flank them.",
     entries: [
-      { kind: "panther", count: 4, gap: 10, delay: 0 },
-      { kind: "panzer", count: 4, gap: 6, delay: 12 },
+      { kind: "stug", count: 3, gap: 9, delay: 0 },
+      { kind: "bike", count: 6, gap: 1.6, delay: 4 },
+      { kind: "infantry", count: 12, gap: 1.3, delay: 8 },
+      { kind: "halftrack", count: 3, gap: 6, delay: 16 },
+    ],
+  },
+  {
+    label: "HEAVY BREAKOUT", intel: "Panthers with escort riders. Watch for Tigers.",
+    entries: [
+      { kind: "panther", count: 3, gap: 11, delay: 0 },
+      { kind: "stug", count: 2, gap: 8, delay: 10 },
+      { kind: "bike", count: 8, gap: 1.4, delay: 2 },
+      { kind: "heinkel", count: 1, gap: 1, delay: 20 },
+    ],
+  },
+  {
+    label: "FINAL ASSAULT", intel: "A Tiger leads everything they have left. Hold the line.",
+    entries: [
+      { kind: "tiger", count: 1, gap: 1, delay: 0 },
+      { kind: "panther", count: 3, gap: 10, delay: 10 },
+      { kind: "panzer", count: 4, gap: 6, delay: 18 },
       { kind: "infantry", count: 16, gap: 1.1, delay: 6 },
-      { kind: "stuka", count: 2, gap: 10, delay: 22 },
+      { kind: "stuka", count: 2, gap: 10, delay: 26 },
     ],
   },
 ];
+
+// procedural endless-wave labels (cycle forever past the scripted waves)
+export const ENDLESS_LABELS = ["ENDLESS ASSAULT", "NO QUARTER", "IRON RAIN", "STEEL TIDE", "THE LONG NIGHT", "TOTAL WAR"];
 
 export const SELL_RATIO = 0.6;
 export const CP_MAX = 5;

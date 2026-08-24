@@ -1,8 +1,8 @@
 // ── Steel & Tactics — Three.js engine ───────────────────────────────────────
 import * as THREE from "three";
 import {
-  TOWER_DEFS, ENEMY_DEFS, WAVES, TowerKind, EnemyKind, TowerDef, EnemyDef,
-  SELL_RATIO, CP_MAX, ARTY_COST, BASE_MAX,
+  TOWER_DEFS, ENEMY_DEFS, WAVES, TowerKind, EnemyKind, TowerDef, EnemyDef, WaveDef, WaveEntry,
+  SELL_RATIO, CP_MAX, ARTY_COST, BASE_MAX, ENDLESS_LABELS,
 } from "./defs";
 import { sfx } from "./audio";
 
@@ -64,6 +64,7 @@ interface Enemy {
   heading: number; dist: number; hp: number; maxHp: number; flashT: number;
   dead: boolean; flying: boolean; lane: number; flyY: number; bombDropped: boolean; sirenPlayed: boolean;
   targetId: number; falling: boolean; fallVy: number; hpBar: THREE.Group | null;
+  phase: number; bombs: number; strafeT: number; armorMul: number;
 }
 interface Proj {
   mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3;
@@ -77,7 +78,8 @@ interface Particle {
 }
 interface Truck { group: THREE.Group; pos: THREE.Vector3; towerId: number; state: "go" | "unload" | "back"; unloadT: number }
 interface Wreck { group: THREE.Group; life: number; smokeT: number }
-interface Crater { group: THREE.Group; core: THREE.Mesh; rim: THREE.Mesh; coreMat: THREE.MeshBasicMaterial; rimMat: THREE.MeshLambertMaterial; life: number; maxLife: number }
+interface Crater { mesh: THREE.Mesh; mat: THREE.MeshBasicMaterial; life: number; maxLife: number; s0: number }
+interface Gib { mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3; rotV: THREE.Vector3; life: number; maxLife: number; s: number }
 
 const GRAV = 22;
 const SPARK_MAX = 260;
@@ -134,8 +136,10 @@ export class Engine {
   private flashLights: THREE.PointLight[] = [];
   private craters: Crater[] = [];
   private craterGeo = new THREE.CircleGeometry(1, 26);
-  private craterRimGeo = new THREE.TorusGeometry(1, 0.22, 6, 26);
   private craterTex!: THREE.Texture;
+  private gibs: Gib[] = [];
+  private gibGeos: THREE.BoxGeometry[] = [];
+  private gibMats: THREE.MeshLambertMaterial[] = [];
   private sparkTex!: THREE.Texture;
   private smokeTex!: THREE.Texture;
 
@@ -153,6 +157,7 @@ export class Engine {
   private waveT = 0;
   private between = true;
   private nextIn = 12;
+  private waveHpMul = 1;
   private waveDamageTaken = false;
   private spawnQueue: { kind: EnemyKind; t: number }[] = [];
   private endT = -1;
@@ -578,23 +583,38 @@ export class Engine {
     }
     this.craterTex = new THREE.CanvasTexture(cv);
 
-    // crater pool (pooled groups, recycled)
+    // crater pool — flat baked-texture decals, no geometry
     this.craterGeo.rotateX(-Math.PI / 2);
-    this.craterRimGeo.rotateX(-Math.PI / 2);
-    for (let i = 0; i < 22; i++) {
-      const coreMat = new THREE.MeshBasicMaterial({
+    for (let i = 0; i < 24; i++) {
+      const mat = new THREE.MeshBasicMaterial({
         map: this.craterTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
       });
-      const rimMat = new THREE.MeshLambertMaterial({ color: 0x55432a, transparent: true, opacity: 0 });
-      const core = new THREE.Mesh(this.craterGeo, coreMat);
-      core.position.y = 0.06;
-      const rim = new THREE.Mesh(this.craterRimGeo, rimMat);
-      rim.position.y = 0.12;
-      const group = new THREE.Group();
-      group.add(core, rim);
-      group.visible = false;
-      this.scene.add(group);
-      this.craters.push({ group, core, rim, coreMat, rimMat, life: 0, maxLife: 1 });
+      const mesh = new THREE.Mesh(this.craterGeo, mat);
+      mesh.position.y = 0.07;
+      mesh.visible = false;
+      this.scene.add(mesh);
+      this.craters.push({ mesh, mat, life: 0, maxLife: 1, s0: 1 });
+    }
+
+    // debris pool (vehicles burst into parts that scatter, bounce and fade)
+    this.gibGeos = [
+      new THREE.BoxGeometry(0.5, 0.35, 0.7),
+      new THREE.BoxGeometry(0.85, 0.25, 0.4),
+      new THREE.BoxGeometry(0.32, 0.32, 0.32),
+    ];
+    this.gibMats = [0x4a4f38, 0x3a3e2c, 0x2c2e24, 0x57503a].map(
+      (c) => new THREE.MeshLambertMaterial({ color: c, transparent: true }),
+    );
+    for (let i = 0; i < 90; i++) {
+      const mat = new THREE.MeshLambertMaterial({ color: 0x4a4f38, transparent: true, opacity: 0 });
+      const mesh = new THREE.Mesh(this.gibGeos[i % this.gibGeos.length], mat);
+      mesh.visible = false;
+      mesh.castShadow = true;
+      this.scene.add(mesh);
+      this.gibs.push({
+        mesh, pos: new THREE.Vector3(), vel: new THREE.Vector3(), rotV: new THREE.Vector3(),
+        life: 0, maxLife: 1, s: 1,
+      });
     }
 
     this.ghostMatOk = new THREE.MeshBasicMaterial({ color: 0xa4c94e, transparent: true, opacity: 0.45, depthWrite: false });
@@ -638,16 +658,14 @@ export class Engine {
     let d = this.craters.find((x) => x.life <= 0);
     if (!d) d = this.craters.reduce((a, b) => (a.life < b.life ? a : b));
     const size = Math.max(0.8, r);
-    d.group.visible = true;
-    d.group.position.set(pos.x, this.heightAt(pos.x, pos.z), pos.z);
-    d.group.rotation.y = rand(0, 6.28);
-    d.core.scale.setScalar(size * 1.25);
-    d.rim.scale.set(size * 0.82, 1, size * 0.82);
-    d.rim.position.y = 0.12 + size * 0.05;
-    d.coreMat.opacity = 0.92;
-    d.rimMat.opacity = 0.85;
-    d.life = 30;
-    d.maxLife = 30;
+    d.mesh.visible = true;
+    d.mesh.position.set(pos.x, this.heightAt(pos.x, pos.z) + 0.07, pos.z);
+    d.mesh.rotation.y = rand(0, 6.28);
+    d.s0 = size * 1.3;
+    d.mesh.scale.setScalar(d.s0);
+    d.mat.opacity = 0.95;
+    d.life = rand(26, 38);
+    d.maxLife = d.life;
     // kicked-out dirt clods around the lip
     for (let i = 0; i < 6; i++) {
       const a = rand(0, Math.PI * 2);
@@ -656,6 +674,59 @@ export class Engine {
         new THREE.Vector3(Math.cos(a) * rand(4, 9), rand(5, 10), Math.sin(a) * rand(4, 9)),
         0.7, rand(0.25, 0.5), new THREE.Color(0.32, 0.24, 0.13), 22,
       );
+    }
+  }
+
+  // destroyed vehicles burst into scattering, bouncing parts that fade out
+  private spawnGibs(e: Enemy, count: number, power: number) {
+    for (let i = 0; i < count; i++) {
+      let g = this.gibs.find((x) => x.life <= 0);
+      if (!g) g = this.gibs.reduce((a, b) => (a.life < b.life ? a : b));
+      g.mesh.visible = true;
+      g.mesh.material = this.gibMats[Math.floor(rand(0, this.gibMats.length))];
+      g.pos.set(e.pos.x + rand(-1, 1), e.pos.y + rand(0.6, 2.2), e.pos.z + rand(-1, 1));
+      const a = rand(0, Math.PI * 2);
+      const sp = rand(0.35, 1) * power;
+      g.vel.set(Math.cos(a) * sp, rand(3, 7 + power * 0.5), Math.sin(a) * sp);
+      g.rotV.set(rand(-7, 7), rand(-7, 7), rand(-7, 7));
+      g.s = rand(0.3, 0.8) * (e.def.radius / 1.9 + 0.35);
+      g.life = rand(2.2, 4.2);
+      g.maxLife = g.life;
+      g.mesh.position.copy(g.pos);
+      g.mesh.scale.setScalar(g.s);
+      (g.mesh.material as THREE.MeshLambertMaterial).opacity = 1;
+      g.mesh.rotation.set(rand(0, 3), rand(0, 3), rand(0, 3));
+    }
+  }
+
+  private updateGibs(dt: number) {
+    for (const g of this.gibs) {
+      if (g.life <= 0) continue;
+      g.life -= dt;
+      g.vel.y -= 26 * dt;
+      g.pos.addScaledVector(g.vel, dt);
+      const ground = this.heightAt(g.pos.x, g.pos.z) + g.s * 0.3;
+      if (g.pos.y <= ground) {
+        g.pos.y = ground;
+        g.vel.y = Math.abs(g.vel.y) > 2 ? -g.vel.y * 0.38 : 0;
+        g.vel.x *= 0.72;
+        g.vel.z *= 0.72;
+        g.rotV.multiplyScalar(0.8);
+      }
+      g.mesh.position.copy(g.pos);
+      g.mesh.rotation.x += g.rotV.x * dt;
+      g.mesh.rotation.y += g.rotV.y * dt;
+      g.mesh.rotation.z += g.rotV.z * dt;
+      const k = g.life / g.maxLife;
+      if (k < 0.4) {
+        const f = k / 0.4;
+        g.mesh.scale.setScalar(g.s * (0.25 + 0.75 * f));
+        (g.mesh.material as THREE.MeshLambertMaterial).opacity = f;
+      }
+      if (g.life <= 0) {
+        g.mesh.visible = false;
+        (g.mesh.material as THREE.MeshLambertMaterial).opacity = 0;
+      }
     }
   }
 
@@ -711,7 +782,7 @@ export class Engine {
       const fx = Math.sin(e.heading), fz = Math.cos(e.heading);
       const d = velDir.clone().normalize();
       const c = d.x * fx + d.z * fz;
-      const armor = c < -0.5 ? e.def.armorF : c > 0.5 ? e.def.armorR : e.def.armorS;
+      const armor = (c < -0.5 ? e.def.armorF : c > 0.5 ? e.def.armorR : e.def.armorS) * e.armorMul;
       if (pen >= armor) {
         this.burst(hitPoint, 6, 9, 0.3, 0.45, new THREE.Color(1, 0.8, 0.4));
       } else {
@@ -767,12 +838,13 @@ export class Engine {
       this.spawnSmoke(e.pos.clone(), new THREE.Vector3(0, 1, 0), 1.8, 2.4, 0.28);
     } else {
       e.dead = true;
-      this.explode(e.pos.clone().setY(e.pos.y + 1), e.def.radius * 1.7, 0, { big: e.kind === "panther" || e.kind === "panzer" });
-      const w: Wreck = { group: this.makeWreckMesh(e.kind), life: 34, smokeT: 0 };
-      w.group.position.copy(e.pos);
-      w.group.rotation.y = e.heading + rand(-0.4, 0.4);
-      this.dyn.add(w.group);
-      this.wrecks.push(w);
+      const heavy = e.kind === "panther" || e.kind === "panzer" || e.kind === "tiger";
+      this.explode(e.pos.clone().setY(e.pos.y + 1), e.def.radius * 1.7, 0, { big: heavy });
+      // vehicle bursts into scattering parts — the road stays clear
+      this.spawnGibs(e, Math.round(5 + e.def.radius * 3.2), 4 + e.def.radius * 2.4);
+      for (let i = 0; i < 2; i++) {
+        this.spawnSmoke(e.pos.clone().add(new THREE.Vector3(rand(-1, 1), 1, rand(-1, 1))), new THREE.Vector3(rand(-1, 1), 2.4, rand(-1, 1)), rand(1, 1.8), rand(1.4, 2.2), 0.25);
+      }
       this.dyn.remove(e.group);
     }
     if (e.hpBar) e.hpBar = null;
@@ -1114,8 +1186,61 @@ export class Engine {
       g.add(fuse, nose, wing, tail, fin, canopy);
       return { group: g, soldiers };
     }
+    if (kind === "heinkel") {
+      const fuse = this.box(1.1, 1.15, 7.2, this.mats.plane, 0, 0, 0);
+      fuse.castShadow = true;
+      const nose = this.box(0.9, 0.85, 1.3, this.mats.gunmetal, 0, -0.05, 4.1);
+      const wing = this.box(13.0, 0.14, 2.4, this.mats.plane, 0, 0.2, 0.6);
+      wing.castShadow = true;
+      const tail = this.box(4.4, 0.1, 1.4, this.mats.plane, 0, 0.3, -3.3);
+      const fin1 = this.box(0.12, 1.3, 1.1, this.mats.plane, -1.1, 0.95, -3.3);
+      const fin2 = this.box(0.12, 1.3, 1.1, this.mats.plane, 1.1, 0.95, -3.3);
+      for (const sx of [-2.5, 2.5]) {
+        const nac = this.cyl(0.3, 1.7, this.mats.planeAccent, sx, 0.05, 1.4);
+        nac.rotation.x = Math.PI / 2;
+        g.add(nac);
+      }
+      g.add(fuse, nose, wing, tail, fin1, fin2);
+      return { group: g, soldiers };
+    }
     // vehicles
-    if (kind === "scout") {
+    if (kind === "bike") {
+      for (const sz of [-0.75, 0.75]) {
+        const w = this.cyl(0.28, 0.1, this.mats.track, 0, 0.28, sz);
+        w.rotation.z = Math.PI / 2;
+        g.add(w);
+      }
+      const frame = this.box(0.24, 0.3, 1.3, this.mats.hullDark, 0, 0.5, 0);
+      const tank = this.box(0.26, 0.22, 0.5, this.mats.hull, 0, 0.68, 0.15);
+      const bar = this.box(0.6, 0.06, 0.06, this.mats.steelDark, 0, 0.85, 0.6);
+      g.add(frame, tank, bar);
+      const rider = new THREE.Group();
+      const body = new THREE.Mesh(this.geos.capsule, this.mats.uniform);
+      body.scale.set(0.16, 0.3, 0.16);
+      body.position.y = 1.05;
+      body.rotation.x = 0.35;
+      const head = new THREE.Mesh(this.geos.sphere, this.mats.helmet);
+      head.scale.setScalar(0.14);
+      head.position.set(0, 1.42, -0.12);
+      rider.add(body, head);
+      soldiers.push(rider);
+      g.add(rider);
+    } else if (kind === "stug") {
+      // casemate tank destroyer — low silhouette, fixed forward gun
+      const hull = this.box(2.3, 0.95, 4.4, this.mats.hull, 0, 0.85, 0);
+      hull.castShadow = true;
+      const casemate = this.box(2.1, 0.75, 2.6, this.mats.hullDark, 0, 1.65, 0.3);
+      const glacis = this.box(2.3, 0.7, 0.9, this.mats.hull, 0, 0.95, 2.35);
+      glacis.rotation.x = 0.5;
+      const mantlet = this.box(0.7, 0.5, 0.5, this.mats.steelDark, 0, 1.65, 1.7);
+      const gun = this.cyl(0.08, 3.0, this.mats.gunmetal, 0, 1.65, 3.2);
+      gun.rotation.x = Math.PI / 2;
+      for (const sx of [-1.25, 1.25]) {
+        const tr = this.box(0.4, 0.8, 4.6, this.mats.track, sx, 0.45, 0);
+        g.add(tr);
+      }
+      g.add(hull, casemate, glacis, mantlet, gun);
+    } else if (kind === "scout") {
       const hull = this.box(1.7, 0.95, 2.7, this.mats.hull, 0, 0.85, 0);
       hull.castShadow = true;
       const tur = this.box(1.0, 0.5, 1.2, this.mats.hullDark, 0, 1.55, -0.1);
@@ -1142,20 +1267,28 @@ export class Engine {
         g.add(tr);
       }
     } else {
-      const heavy = kind === "panther";
-      const hull = this.box(heavy ? 2.5 : 2.2, 1.0, heavy ? 4.9 : 4.2, this.mats.hull, 0, 0.95, 0);
+      const heavy = kind === "panther" || kind === "tiger";
+      const tiger = kind === "tiger";
+      const hull = this.box(tiger ? 2.7 : heavy ? 2.5 : 2.2, 1.0, tiger ? 5.3 : heavy ? 4.9 : 4.2, this.mats.hull, 0, 0.95, 0);
       hull.castShadow = true;
-      const glacis = this.box(heavy ? 2.5 : 2.2, 0.7, 1.0, this.mats.hull, 0, 0.95, heavy ? 2.6 : 2.3);
+      const glacis = this.box(tiger ? 2.7 : heavy ? 2.5 : 2.2, 0.7, 1.0, this.mats.hull, 0, 0.95, tiger ? 2.8 : heavy ? 2.6 : 2.3);
       glacis.rotation.x = heavy ? 0.6 : 0.35;
-      for (const sx of [-(heavy ? 1.35 : 1.2), heavy ? 1.35 : 1.2]) {
-        const tr = this.box(0.45, 0.85, heavy ? 5.1 : 4.5, this.mats.track, sx, 0.5, 0);
+      for (const sx of [-(tiger ? 1.5 : heavy ? 1.35 : 1.2), tiger ? 1.5 : heavy ? 1.35 : 1.2]) {
+        const tr = this.box(0.5, 0.9, tiger ? 5.5 : heavy ? 5.1 : 4.5, this.mats.track, sx, 0.52, 0);
         g.add(tr);
       }
-      const tur = this.box(heavy ? 1.9 : 1.7, 0.72, heavy ? 2.5 : 2.0, this.mats.hullDark, 0, 1.8, -0.25);
+      const tur = this.box(tiger ? 2.0 : heavy ? 1.9 : 1.7, tiger ? 0.85 : 0.72, tiger ? 2.3 : heavy ? 2.5 : 2.0, this.mats.hullDark, 0, tiger ? 1.9 : 1.8, -0.25);
       tur.castShadow = true;
-      const gun = this.cyl(heavy ? 0.08 : 0.07, heavy ? 3.4 : 2.5, this.mats.gunmetal, 0, 1.85, heavy ? 2.5 : 1.9);
+      const gun = this.cyl(tiger ? 0.1 : heavy ? 0.08 : 0.07, tiger ? 3.2 : heavy ? 3.4 : 2.5, this.mats.gunmetal, 0, tiger ? 1.95 : 1.85, tiger ? 2.7 : heavy ? 2.5 : 1.9);
       gun.rotation.x = Math.PI / 2;
       g.add(hull, glacis, tur, gun);
+      if (tiger) {
+        // muzzle brake + commander's cupola
+        const brake = this.cyl(0.16, 0.4, this.mats.steelDark, 0, 1.95, 4.3);
+        brake.rotation.x = Math.PI / 2;
+        const cupola = this.cyl(0.3, 0.3, this.mats.hullDark, -0.55, 2.45, -0.6);
+        g.add(brake, cupola);
+      }
     }
     return { group: g, soldiers };
   }
@@ -1163,19 +1296,24 @@ export class Engine {
   private spawnEnemy(kind: EnemyKind) {
     const def = ENEMY_DEFS[kind];
     const { group, soldiers } = this.buildEnemyMesh(kind);
+    const laneW = kind === "bike" ? 3.4 : kind === "tiger" ? 1.1 : kind === "infantry" ? 2.8 : 1.6;
     const e: Enemy = {
       id: this.nextId++, kind, def, group, soldiers,
       pos: new THREE.Vector3(), vel: new THREE.Vector3(),
-      heading: 0, dist: rand(0, 1.5), hp: def.hp, maxHp: def.hp, flashT: 0,
-      dead: false, flying: def.flying, lane: kind === "infantry" ? rand(-2.8, 2.8) : rand(-1.6, 1.6),
-      flyY: 27, bombDropped: false, sirenPlayed: false, targetId: -1,
+      heading: 0, dist: rand(0, 1.5), hp: def.hp * this.waveHpMul, maxHp: def.hp * this.waveHpMul, flashT: 0,
+      dead: false, flying: def.flying, lane: rand(-laneW, laneW),
+      flyY: kind === "heinkel" ? 34 : 27, bombDropped: false, sirenPlayed: false, targetId: -1,
       falling: false, fallVy: 0, hpBar: null,
+      phase: rand(0, 2.2), bombs: kind === "heinkel" ? 3 : 0, strafeT: rand(0.4, 1.2),
+      armorMul: 1 + (this.waveHpMul - 1) * 0.5,
     };
     if (kind === "stuka") {
       e.pos.set(-100, 27, rand(-42, 42));
-      const target = this.pickStukaTarget();
-      e.targetId = target;
+      e.targetId = this.pickStukaTarget();
       group.rotation.z = 0.06;
+    } else if (kind === "heinkel") {
+      e.pos.set(105, 34, rand(-34, 34));
+      e.targetId = this.pickStukaTarget();
     } else {
       const s = this.pathPoint(e.dist);
       e.pos.set(s.x + -s.dz * e.lane, this.heightAt(s.x, s.z), s.z + s.dx * e.lane);
@@ -1444,7 +1582,8 @@ export class Engine {
     this.ringPulses = [];
     for (const s of this.sparks) s.life = 0;
     for (const s of this.smokes) s.life = 0;
-    for (const c of this.craters) { c.life = 0; c.group.visible = false; c.coreMat.opacity = 0; c.rimMat.opacity = 0; }
+    for (const c of this.craters) { c.life = 0; c.mesh.visible = false; c.mat.opacity = 0; }
+    for (const g of this.gibs) { g.life = 0; g.mesh.visible = false; }
     this.rp = 400; this.cp = 2; this.baseHp = BASE_MAX; this.kills = 0; this.score = 0; this.playT = 0;
     this.waveIdx = -1; this.waveT = 0; this.between = true; this.nextIn = 12;
     this.spawnQueue = []; this.endT = -1;
@@ -1720,10 +1859,40 @@ export class Engine {
     });
   }
 
-  // ── waves ────────────────────────────────────────────────────────────────
+  // ── waves (scripted, then endless) ───────────────────────────────────────
+  nextWaveInfo(): { label: string; intel: string } {
+    const w = this.waveDefFor(this.waveIdx + 1);
+    return { label: w.label, intel: w.intel };
+  }
+
+  private waveDefFor(i: number): WaveDef {
+    if (i < WAVES.length) return WAVES[i];
+    const n = i - WAVES.length + 1; // 1-based endless wave number
+    const w = WAVES.length;
+    const cap = (v: number, m: number) => Math.min(m, v);
+    const entries: WaveEntry[] = [
+      { kind: "infantry", count: cap(10 + n * 2, 30), gap: Math.max(0.7, 1.4 - n * 0.04), delay: 4 },
+      { kind: "bike", count: cap(4 + n, 14), gap: 1.3, delay: 0 },
+      { kind: "scout", count: cap(2 + Math.floor(n / 2), 8), gap: 5, delay: 8 },
+      { kind: "halftrack", count: cap(2 + Math.floor(n / 2), 9), gap: 5.5, delay: 12 },
+      { kind: "panzer", count: cap(2 + Math.floor(n / 2), 10), gap: 7, delay: 16 },
+      { kind: "stug", count: cap(1 + Math.floor(n / 2), 8), gap: 8, delay: 20 },
+      { kind: "stuka", count: cap(1 + Math.floor(n / 3), 5), gap: 8, delay: 26 },
+    ];
+    if (n >= 2) entries.push({ kind: "panther", count: cap(1 + Math.floor(n / 3), 7), gap: 10, delay: 22 });
+    if (n >= 3 && n % 2 === 1) entries.push({ kind: "heinkel", count: cap(Math.floor(n / 3), 3), gap: 14, delay: 30 });
+    if (n >= 4) entries.push({ kind: "tiger", count: cap(Math.floor(n / 3), 5), gap: 14, delay: 6 });
+    return {
+      label: ENDLESS_LABELS[(i - w) % ENDLESS_LABELS.length],
+      intel: `The offensive does not end. Reinforcements every wave — armor scales +${Math.round(n * 16)}%.`,
+      entries,
+    };
+  }
+
   private startWave() {
     this.waveIdx++;
-    const w = WAVES[this.waveIdx];
+    const w = this.waveDefFor(this.waveIdx);
+    this.waveHpMul = this.waveIdx < WAVES.length ? 1 : 1 + (this.waveIdx - WAVES.length + 1) * 0.16;
     this.spawnQueue = [];
     for (const en of w.entries) {
       for (let i = 0; i < en.count; i++) {
@@ -1746,15 +1915,15 @@ export class Engine {
     const cpGain = this.waveDamageTaken ? 1 : 2;
     this.cp = Math.min(CP_MAX, this.cp + cpGain);
     sfx.play("coin");
-    if (this.waveIdx >= WAVES.length - 1) {
-      this.onUi({ t: "banner", text: "SECTOR SECURED", sub: "All assaults repelled. Outstanding, Commander.", tone: "good" });
-      this.endT = 2.2;
-      this.endScreen = "won";
-    } else {
-      this.between = true;
-      this.nextIn = 10;
-      this.onUi({ t: "banner", text: `WAVE CLEARED  +${bonus} RP`, sub: this.waveDamageTaken ? "Resupply and reinforce." : "Flawless defense — bonus command point.", tone: "good" });
-    }
+    this.between = true;
+    this.nextIn = 10;
+    const milestone = (this.waveIdx + 1) % 5 === 0;
+    this.onUi({
+      t: "banner",
+      text: `WAVE CLEARED  +${bonus} RP`,
+      sub: milestone ? `Wave ${this.waveIdx + 1} repelled. They keep coming, Commander.` : this.waveDamageTaken ? "Resupply and reinforce." : "Flawless defense — bonus command point.",
+      tone: "good",
+    });
     this.pushHud();
   }
 
@@ -1795,8 +1964,7 @@ export class Engine {
     if (this.endT >= 0) return;
     if (this.between) {
       this.nextIn -= dt;
-      if (this.nextIn <= 0 && this.waveIdx < WAVES.length - 1) this.startWave();
-      else if (this.nextIn <= 0 && this.waveIdx === -1) this.startWave();
+      if (this.nextIn <= 0) this.startWave();
       return;
     }
     this.waveT += dt;
@@ -1830,13 +1998,9 @@ export class Engine {
         if (Math.random() < 0.55) this.spawnSpark(e.pos.clone(), new THREE.Vector3(rand(-4, 4), rand(-1, 5), rand(-4, 4)), 0.42, 0.75, new THREE.Color(1, 0.5, 0.12), 6);
         e.group.position.copy(e.pos);
         if (e.pos.y <= this.heightAt(e.pos.x, e.pos.z) + 0.6) {
-          this.explode(e.pos.clone(), 5.5, 60, { big: true, hurtsTowers: true, crater: 1.3 });
-          const w: Wreck = { group: this.makeWreckMesh("stuka"), life: 30, smokeT: 0 };
-          w.group.position.set(e.pos.x, this.heightAt(e.pos.x, e.pos.z), e.pos.z);
-          w.group.rotation.y = e.heading;
-          w.group.scale.setScalar(0.8);
-          this.dyn.add(w.group);
-          this.wrecks.push(w);
+          const big = e.kind === "heinkel";
+          this.explode(e.pos.clone(), big ? 7.5 : 5.5, big ? 90 : 60, { big: true, hurtsTowers: true, crater: big ? 1.7 : 1.3 });
+          this.spawnGibs(e, big ? 16 : 10, big ? 11 : 8);
           this.dyn.remove(e.group);
           this.enemies.splice(i, 1);
         }
@@ -1844,7 +2008,8 @@ export class Engine {
       }
 
       if (e.flying) {
-        this.updateStuka(e, dt);
+        if (e.kind === "heinkel") this.updateBomber(e, dt);
+        else this.updateStuka(e, dt);
         continue;
       }
 
@@ -1876,7 +2041,21 @@ export class Engine {
       }
 
       const prev = e.pos.clone();
-      e.dist += e.def.speed * slow * dt;
+      // infantry advances in bounding-overwatch rushes; vehicles keep column spacing
+      let gait = 1;
+      if (e.kind === "infantry") {
+        const cyc = (this.playT + e.phase) % 2.2;
+        gait = cyc < 1.4 ? 1.45 : 0.12;
+      } else {
+        for (const o of this.enemies) {
+          if (o === e || o.dead || o.flying || o.kind === "infantry" || o.kind === "bike") continue;
+          const gap = o.dist - e.dist;
+          if (gap > 0 && gap < 5.5 && Math.abs(o.lane - e.lane) < 2.4) {
+            gait = Math.min(gait, gap < 2.6 ? 0.1 : gap < 4 ? 0.55 : 0.85);
+          }
+        }
+      }
+      e.dist += e.def.speed * slow * gait * dt;
       if (e.dist >= this.pathTotal - 1.5) {
         // reached HQ
         this.dyn.remove(e.group);
@@ -1943,11 +2122,70 @@ export class Engine {
         dmg: 135, pen: 999, splash: 6, splashDmg: 135, kind: "bomb", life: 8, manual: false, dead: false,
       });
     }
+    // MG strafing pass on the way in
+    if (!e.bombDropped && target && dist < 34) {
+      e.strafeT -= dt;
+      if (e.strafeT <= 0) {
+        e.strafeT = 1.15;
+        sfx.play("mg");
+        for (let k = 0; k < 3; k++) {
+          this.spawnSpark(
+            e.pos.clone().add(new THREE.Vector3(rand(-0.5, 0.5), -0.6, rand(-0.5, 0.5))),
+            new THREE.Vector3((dx / (dist || 1)) * 60 + rand(-4, 4), -38, (dz / (dist || 1)) * 60 + rand(-4, 4)),
+            0.4, 0.5, new THREE.Color(1, 0.55, 0.25), 26,
+          );
+        }
+        this.damageTower(target, 2.2);
+      }
+    }
     e.group.position.copy(e.pos);
     e.group.rotation.y = e.heading;
     e.group.rotation.x = e.bombDropped ? -0.5 : dist < 26 ? 0.22 : 0;
+    e.group.rotation.z = Math.sin(this.playT * 2.6 + e.phase) * 0.16;
     e.vel.set((dx / (dist || 1)) * sp, 0, (dz / (dist || 1)) * sp);
     if (e.bombDropped && (Math.abs(e.pos.x) > 105 || Math.abs(e.pos.z) > 75)) {
+      this.dyn.remove(e.group);
+      e.dead = true;
+    }
+  }
+
+  // He 111: high-altitude level bomber — crosses the map and walks bombs onto the target
+  private updateBomber(e: Enemy, dt: number) {
+    let tx = 66, tz = 22;
+    const target = this.towers.find((t) => t.id === e.targetId && !t.dead);
+    if (target) { tx = target.pos.x; tz = target.pos.z; }
+    const sp = e.def.speed;
+    e.pos.x -= sp * dt; // steady westbound run
+    // ease toward the target lane before the bomb run
+    e.pos.z = lerp(e.pos.z, tz, Math.min(1, dt * 0.8));
+    e.heading = Math.atan2(-1, (tz - e.pos.z) * 0.05);
+    e.pos.y = e.flyY;
+    if (!e.sirenPlayed) {
+      e.sirenPlayed = true;
+      sfx.play("siren");
+      this.onUi({ t: "toast", text: "BOMBER FORMATION OVERHEAD — WESTBOUND" });
+    }
+    // walk three bombs onto the target as it passes
+    if (e.bombs > 0 && Math.abs(e.pos.x - tx) < 10 && Math.abs(e.pos.z - tz) < 12) {
+      e.strafeT -= dt;
+      if (e.strafeT <= 0) {
+        e.strafeT = 0.55;
+        e.bombs--;
+        const bomb = new THREE.Mesh(this.bombGeo, this.bombMat);
+        const bpos = e.pos.clone().add(new THREE.Vector3(0, -1.2, 0));
+        bomb.position.copy(bpos);
+        this.dyn.add(bomb);
+        this.projs.push({
+          mesh: bomb, pos: bpos, vel: new THREE.Vector3(-sp * 0.5, -4, 0),
+          dmg: 120, pen: 999, splash: 5.5, splashDmg: 120, kind: "bomb", life: 8, manual: false, dead: false,
+        });
+      }
+    }
+    e.group.position.copy(e.pos);
+    e.group.rotation.y = e.heading;
+    e.group.rotation.z = Math.sin(this.playT * 1.4 + e.phase) * 0.06;
+    e.vel.set(-sp, 0, 0);
+    if (e.pos.x < -110) {
       this.dyn.remove(e.group);
       e.dead = true;
     }
@@ -2224,15 +2462,16 @@ export class Engine {
     for (const c of this.craters) {
       if (c.life > 0) {
         c.life -= rdt;
-        if (c.life <= 0) { c.group.visible = false; continue; }
-        // gradual fade over the full lifetime, rim settles into the mud
+        if (c.life <= 0) { c.mesh.visible = false; continue; }
+        // blast blooms outward for a beat, then the scorch slowly weather away
+        const age = c.maxLife - c.life;
+        const bloom = age < 0.22 ? 1.16 - 0.16 * (age / 0.22) : 1;
+        c.mesh.scale.setScalar(c.s0 * bloom);
         const k = c.life / c.maxLife;
-        const fade = k < 0.55 ? k / 0.55 : 1;
-        c.coreMat.opacity = 0.92 * fade;
-        c.rimMat.opacity = 0.85 * fade;
-        c.rim.position.y = 0.12 + (c.rim.scale.x / 0.82) * 0.05 * k;
+        c.mat.opacity = 0.95 * (k < 0.5 ? k / 0.5 : 1);
       }
     }
+    this.updateGibs(rdt);
 
     for (let i = this.wrecks.length - 1; i >= 0; i--) {
       const w = this.wrecks[i];
