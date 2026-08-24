@@ -68,6 +68,10 @@ const ICONS: Record<string, React.ReactNode> = {
   mines: (<Icon><circle cx="12" cy="14" r="5" /><path d="M12 5v4M5 9.5l3.4 1.8M19 9.5l-3.4 1.8" /><path d="M4 21h16" /></Icon>),
   arty: (<Icon><path d="M3 20c6-1 11-6 13-14" /><path d="M14.5 4.5L19 3l-1.5 4.5" /><path d="M2 21h20" /></Icon>),
   airpost: (<Icon><path d="M12 2l2 8 8 3-8 1.5L12 22l-2-7.5L2 13l8-3z" /></Icon>),
+  flame: (<Icon><path d="M12 3c1 3-3 4.5-3 8a3.5 3.5 0 0 0 7 0c0-1.5-.8-2.6-.8-2.6S17 10 17 13a5 5 0 0 1-10 0c0-5 5-6.5 5-10z" /><path d="M8 21h8" /></Icon>),
+  atrifle: (<Icon><path d="M2 17l15-9" /><path d="M17 8l4-2-1 4" /><path d="M6 14l-2 4M9 16l-1 4" /><path d="M2 21h20" /></Icon>),
+  observer: (<Icon><circle cx="8" cy="12" r="3.4" /><circle cx="16" cy="12" r="3.4" /><path d="M11.4 12h1.2M2 9l2.6 3M22 9l-2.6 3" /></Icon>),
+  sapper: (<Icon><path d="M14 6a4 4 0 0 0-5 5L4 16l4 4 5-5a4 4 0 0 0 5-5l-2.5 2.5-3-3z" /><path d="M4 21h9" /></Icon>),
   truck: (<Icon><path d="M1 16V7h11v9" /><path d="M12 10h6l3 3v3h-3" /><circle cx="6" cy="17" r="1.8" /><circle cx="16.5" cy="17" r="1.8" /><path d="M8 16h6" /></Icon>),
   pause: (<Icon><path d="M9 5v14M15 5v14" /></Icon>),
   play: (<Icon><path d="M7 4l13 8-13 8z" /></Icon>),
@@ -108,7 +112,7 @@ function ControlsGuide({ compact = false }: { compact?: boolean }) {
     ["LEFT CLICK", "Place / Select / Manual fire"],
     ["RIGHT CLICK / ESC", "Cancel / Deselect"],
     ["SPACE", "Tactical pause (orders still work)"],
-    ["1–8", "Arm emplacement blueprint"],
+    ["1–0,-,=", "Arm emplacement blueprint"],
     ["U / T", "Upgrade / Targeting"],
     ["B", "Artillery strike mode"],
     ["F / M", "Game speed / Mute"],
@@ -260,7 +264,7 @@ export default function App() {
                 {!sel.structure && sel.maxAmmo > 0 && (
                   <div>
                     <div className="flex justify-between text-[var(--dim)]">
-                      <span>{sel.kind === "airpost" ? "SORTIES" : "AMMUNITION"}</span>
+                      <span>{sel.kind === "airpost" ? "SORTIES" : sel.kind === "flame" ? "FUEL" : "AMMUNITION"}</span>
                       <span className={`hud-num ${sel.ammo === 0 ? "pulse-warn" : "text-[var(--paper)]"}`}>{sel.ammo}/{sel.maxAmmo}</span>
                     </div>
                     <Bar pct={sel.ammo / sel.maxAmmo} cls="amber" />
@@ -288,6 +292,18 @@ export default function App() {
                       <span className="text-[var(--red-hi)]">DEAD ZONE</span>
                       <span className="hud-num text-right text-[var(--red-hi)]">&lt; {sel.minRange} m</span>
                     </>
+                  ) : sel.kind === "observer" ? (
+                    <>
+                      <span>ROLE</span><span className="hud-num text-right text-[var(--olive)]">SPOTTING</span>
+                    </>
+                  ) : sel.kind === "sapper" ? (
+                    <>
+                      <span>ROLE</span><span className="hud-num text-right text-[var(--olive)]">REPAIR</span>
+                    </>
+                  ) : sel.kind === "flame" ? (
+                    <>
+                      <span>ROLE</span><span className="hud-num text-right text-[var(--olive)]">AREA DENIAL</span>
+                    </>
                   ) : (
                     <>
                       <span>TARGETING</span><span className="hud-num text-right text-[var(--amber)]">{sel.targetMode}</span>
@@ -297,6 +313,18 @@ export default function App() {
                 {sel.kind === "airpost" ? (
                   <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
                     THUNDERBOLT LOITERS OVERHEAD &amp; STRAFES ENEMY GROUPS
+                  </div>
+                ) : sel.kind === "observer" ? (
+                  <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
+                    MARKS ENEMIES IN RANGE — MARKED TARGETS TAKE BONUS DAMAGE
+                  </div>
+                ) : sel.kind === "sapper" ? (
+                  <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
+                    CREW REPAIRS NEARBY EMPLACEMENTS &amp; STRUCTURES OVER TIME
+                  </div>
+                ) : sel.kind === "flame" ? (
+                  <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
+                    SHORT-RANGE CONE — IGNITES INFANTRY &amp; LIGHT VEHICLES
                   </div>
                 ) : sel.minRange > 0 ? (
                   <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
@@ -312,7 +340,7 @@ export default function App() {
                 )}
                 {sel.upgradeName && <div className="-mt-1 px-1 text-[9px] text-[var(--dim)]">{sel.upgradeDesc}</div>}
                 {!sel.upgradeName && !sel.structure && <div className="text-center text-[10px] tracking-widest text-[var(--olive)]">FULLY UPGRADED</div>}
-                {!sel.structure && sel.kind !== "airpost" && (
+                {!sel.structure && ["mg", "at", "flak", "arty", "atrifle"].includes(sel.kind) && (
                   <>
                     <button className="btn w-full py-1.5 text-[10px]" onClick={() => eng()?.cycleTargetMode()}>
                       TARGETING: {sel.targetMode} [T]
@@ -328,7 +356,7 @@ export default function App() {
           )}
 
           {/* bottom dock */}
-          <div className="absolute bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-end gap-2">
+          <div className="absolute bottom-3 left-1/2 z-40 flex max-w-[97vw] -translate-x-1/2 flex-wrap items-end justify-center gap-2">
             {TOWER_ORDER.map((k) => {
               const d = TOWER_DEFS[k];
               const armed = ui.build === k;
@@ -451,6 +479,11 @@ export default function App() {
                   <div><span className="text-[var(--paper)]">PANZERS &amp; STUGS</span> — thick frontal plates. Hit the flanks.</div>
                   <div><span className="text-[var(--paper)]">TIGERS</span> — near-immune frontally. Bring the 88 or the howitzer.</div>
                   <div><span className="text-[var(--paper)]">STUKAS &amp; BOMBERS</span> — only the Flak 88 reaches them. Set AIR priority.</div>
+                </div>
+                <div className="mt-2 border-t border-[var(--line)] pt-2 text-[10px] leading-relaxed">
+                  <span className="text-[var(--olive)]">SUPPORT TEAMS</span> — the <span className="text-[var(--paper)]">Observer</span> marks targets for bonus damage,
+                  the <span className="text-[var(--paper)]">Sapper</span> repairs your line, the <span className="text-[var(--paper)]">Flamethrower</span> torches infantry,
+                  and the <span className="text-[var(--paper)]">AT Rifle</span> picks off scouts and riders.
                 </div>
               </div>
             </div>

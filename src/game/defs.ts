@@ -1,6 +1,6 @@
 // ── Steel & Tactics — data definitions ──────────────────────────────────────
 
-export type TowerKind = "mg" | "at" | "flak" | "arty" | "airpost" | "hedgehog" | "wire" | "mines";
+export type TowerKind = "mg" | "at" | "flak" | "arty" | "flame" | "atrifle" | "airpost" | "observer" | "sapper" | "hedgehog" | "wire" | "mines";
 export type EnemyKind = "infantry" | "bike" | "scout" | "halftrack" | "panzer" | "stug" | "panther" | "tiger" | "stuka" | "heinkel";
 
 export interface UpgradeDef { name: string; desc: string; cost: number }
@@ -28,7 +28,7 @@ export interface TowerDef {
   upgrades: UpgradeDef[];
 }
 
-export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "arty", "airpost", "hedgehog", "wire", "mines"];
+export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "flame", "atrifle", "arty", "airpost", "observer", "sapper", "hedgehog", "wire", "mines"];
 
 export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   mg: {
@@ -61,8 +61,28 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
       { name: "RADAR FIRE CONTROL", desc: "+25% range, +20% damage, +25% fire rate", cost: 310 },
     ],
   },
+  flame: {
+    kind: "flame", name: "M2 FLAMETHROWER", short: "FLAME", hotkey: "4",
+    cost: 210, hp: 160, range: 11, rof: 0, dmg: 38, pen: 9, splash: 0, splashDmg: 0,
+    projSpeed: 0, lob: 0, ammo: 100, antiAir: false, structure: false, traverse: 2.8, minRange: 0,
+    upgrades: [
+      { name: "NAPALM MIXTURE", desc: "+60% burn damage, ignition lasts longer", cost: 190 },
+      { name: "EXTENDED FUEL TANKS", desc: "+80 fuel capacity, full refill", cost: 150 },
+      { name: "BLAST SHIELDING", desc: "+140 max HP, +25% cone reach", cost: 230 },
+    ],
+  },
+  atrifle: {
+    kind: "atrifle", name: "PzB 39 AT RIFLE TEAM", short: "AT RIFLE", hotkey: "5",
+    cost: 130, hp: 90, range: 34, rof: 0.9, dmg: 16, pen: 34, splash: 0, splashDmg: 0,
+    projSpeed: 105, lob: 0, ammo: 44, antiAir: false, structure: false, traverse: 1.8, minRange: 0,
+    upgrades: [
+      { name: "TUNGSTEN-CORED ROUNDS", desc: "+70% penetration, +25% damage", cost: 160 },
+      { name: "TWO-MAN RELOAD DRILL", desc: "+45% fire rate", cost: 140 },
+      { name: "DUG-IN PIT", desc: "+120 max HP, +20% range", cost: 180 },
+    ],
+  },
   arty: {
-    kind: "arty", name: "M114 155mm HOWITZER", short: "HOWITZER", hotkey: "4",
+    kind: "arty", name: "M114 155mm HOWITZER", short: "HOWITZER", hotkey: "6",
     cost: 520, hp: 210, range: 74, rof: 0.2, dmg: 26, pen: 95, splash: 7, splashDmg: 90,
     projSpeed: 74, lob: 46, ammo: 14, antiAir: false, structure: false, traverse: 0.9, minRange: 22,
     upgrades: [
@@ -72,7 +92,7 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
     ],
   },
   airpost: {
-    kind: "airpost", name: "P-47D CAS POST", short: "AIR POST", hotkey: "5",
+    kind: "airpost", name: "P-47D CAS POST", short: "AIR POST", hotkey: "7",
     cost: 700, hp: 140, range: 62, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
     projSpeed: 0, lob: 0, ammo: 6, antiAir: false, structure: false, traverse: 0, minRange: 0,
     upgrades: [
@@ -81,20 +101,40 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
       { name: "SECTION OF TWO", desc: "A second Thunderbolt joins the post", cost: 520 },
     ],
   },
+  observer: {
+    kind: "observer", name: "FORWARD OBSERVER TEAM", short: "OBSERVER", hotkey: "8",
+    cost: 180, hp: 110, range: 26, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
+    projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: false, traverse: 0, minRange: 0,
+    upgrades: [
+      { name: "FIELD TELEPHONE NET", desc: "Marked targets take +35% damage (was +25%)", cost: 200 },
+      { name: "COATED OPTICS", desc: "+40% spotting radius", cost: 170 },
+      { name: "ARTILLERY LIAISON", desc: "+15% range to all guns near this team", cost: 260 },
+    ],
+  },
+  sapper: {
+    kind: "sapper", name: "SAPPER REPAIR POST", short: "SAPPER", hotkey: "9",
+    cost: 160, hp: 130, range: 16, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
+    projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: false, traverse: 0, minRange: 0,
+    upgrades: [
+      { name: "POWER TOOLS", desc: "Repairs 60% faster", cost: 170 },
+      { name: "SPARE PARTS DEPOT", desc: "+150 max HP, full repair", cost: 150 },
+      { name: "FIELD WORKSHOP", desc: "+50% repair radius", cost: 210 },
+    ],
+  },
   hedgehog: {
-    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "6",
+    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "0",
     cost: 40, hp: 90, range: 3.2, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
     projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   wire: {
-    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "7",
+    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "-",
     cost: 30, hp: 45, range: 3.6, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
     projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   mines: {
-    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "8",
+    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "=",
     cost: 90, hp: 30, range: 4.6, rof: 0, dmg: 75, pen: 999, splash: 4.6, splashDmg: 75,
     projSpeed: 0, lob: 0, ammo: 3, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],

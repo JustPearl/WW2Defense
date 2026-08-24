@@ -3,7 +3,8 @@
 export type SfxName =
   | "mg" | "cannon" | "flakShot" | "boom" | "boomBig" | "ricochet" | "clang"
   | "build" | "denied" | "coin" | "siren" | "whistle" | "reload" | "horn"
-  | "tinnitus" | "click" | "alarm" | "sell" | "upgrade" | "flyby";
+  | "tinnitus" | "click" | "alarm" | "sell" | "upgrade" | "flyby"
+  | "flame" | "rifle" | "wrench";
 
 export class Sfx {
   private ctx: AudioContext | null = null;
@@ -154,6 +155,18 @@ export class Sfx {
       case "flyby":
         this.tone(1.0, 230, 85, 0.16, "sawtooth");
         this.noise(1.0, 750, 0.22, "bandpass");
+        break;
+      case "flame":
+        this.noise(0.35, 900, 0.2, "bandpass");
+        this.noise(0.25, 2400, 0.1, "highpass");
+        break;
+      case "rifle":
+        this.noise(0.06, 3600, 0.2, "highpass");
+        this.tone(0.07, 300, 120, 0.16, "square");
+        break;
+      case "wrench":
+        this.tone(0.05, 1500, 900, 0.08, "square");
+        this.noise(0.04, 4200, 0.06, "highpass", 0.06);
         break;
     }
   }

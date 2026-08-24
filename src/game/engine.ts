@@ -1,7 +1,7 @@
 // ── Steel & Tactics — Three.js engine ───────────────────────────────────────
 import * as THREE from "three";
 import {
-  TOWER_DEFS, ENEMY_DEFS, WAVES, TowerKind, EnemyKind, TowerDef, EnemyDef, WaveDef, WaveEntry,
+  TOWER_DEFS, TOWER_ORDER, ENEMY_DEFS, WAVES, TowerKind, EnemyKind, TowerDef, EnemyDef, WaveDef, WaveEntry,
   SELL_RATIO, CP_MAX, ARTY_COST, BASE_MAX, ENDLESS_LABELS,
 } from "./defs";
 import { sfx } from "./audio";
@@ -69,6 +69,7 @@ interface Enemy {
   dead: boolean; flying: boolean; lane: number; flyY: number; bombDropped: boolean; sirenPlayed: boolean;
   targetId: number; falling: boolean; fallVy: number; hpBar: THREE.Group | null;
   phase: number; bombs: number; strafeT: number; armorMul: number;
+  burnT: number; markT: number; markMul: number;
 }
 interface Proj {
   mesh: THREE.Mesh; pos: THREE.Vector3; vel: THREE.Vector3;
@@ -162,6 +163,7 @@ export class Engine {
   private between = true;
   private nextIn = 12;
   private waveHpMul = 1;
+  private burnDps = 6;
   private waveDamageTaken = false;
   private spawnQueue: { kind: EnemyKind; t: number }[] = [];
   private endT = -1;
@@ -780,6 +782,8 @@ export class Engine {
   private damageEnemy(e: Enemy, dmg: number, pen: number, hitPoint: THREE.Vector3, velDir: THREE.Vector3) {
     if (e.dead || e.falling) return;
     let finalDmg = dmg;
+    // forward-observer target designation
+    if (e.markT > 0) finalDmg *= e.markMul;
     if (pen < 900) {
       const fx = Math.sin(e.heading), fz = Math.cos(e.heading);
       const d = velDir.clone().normalize();
@@ -1056,6 +1060,99 @@ export class Engine {
       group.add(panel);
       group.add(this.box(0.5, 0.07, 1.12, this.mats.barRed, 1.3, 0.34, 0.6));
       group.add(soldier(-0.2, 0.6), soldier(0.7, -0.5));
+    } else if (kind === "flame") {
+      // M2 flamethrower: skid mount, twin fuel tanks, hose-fed nozzle
+      group.add(this.box(2.2, 0.24, 1.5, this.mats.steelDark, 0, 0.12, 0));
+      group.add(this.box(1.9, 0.16, 1.2, this.mats.hullDark, 0, 0.3, 0));
+      const tankL = this.cyl(0.42, 1.5, this.mats.olive, -0.55, 1.1, -0.15);
+      const tankR = this.cyl(0.42, 1.5, this.mats.olive, 0.55, 1.1, -0.15);
+      tankL.castShadow = tankR.castShadow = true;
+      const capL = this.cyl(0.44, 0.1, this.mats.steelDark, -0.55, 1.9, -0.15);
+      const capR = this.cyl(0.44, 0.1, this.mats.steelDark, 0.55, 1.9, -0.15);
+      turret.position.y = 0.95;
+      const cradle = this.box(0.42, 0.36, 0.8, this.mats.hullDark, 0, 0, 0.1);
+      const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
+      tube.scale.set(0.09, 1.7, 0.09);
+      tube.rotation.x = Math.PI / 2;
+      tube.position.set(0, 0.05, 0.9);
+      barrel.add(cradle, tube);
+      muzzle.position.set(0, 0.05, 1.85);
+      barrel.add(muzzle);
+      // hose from tanks to nozzle
+      const hose = this.cyl(0.05, 1.1, this.mats.dark, -0.3, 0.5, 0.5);
+      hose.rotation.x = 1.1;
+      turret.add(barrel, hose);
+      group.add(tankL, tankR, capL, capR, turret, soldier(0, -1.5));
+      loader = group.children[group.children.length - 1] as THREE.Object3D;
+    } else if (kind === "atrifle") {
+      // PzB 39 anti-tank rifle team: prone gunner, long rifle on bipod
+      const pad = this.box(1.7, 0.1, 2.4, this.mats.dirt, 0, 0.05, 0);
+      group.add(pad);
+      turret.position.y = 0.42;
+      const stock = this.box(0.14, 0.16, 1.0, this.mats.wood, 0, 0, -0.55);
+      const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
+      tube.scale.set(0.05, 2.6, 0.05);
+      tube.rotation.x = Math.PI / 2;
+      tube.position.set(0, 0.04, 0.75);
+      barrel.add(stock, tube);
+      muzzle.position.set(0, 0.04, 2.1);
+      barrel.add(muzzle);
+      const bipodL = this.cyl(0.03, 0.5, this.mats.steelDark, -0.14, -0.2, 1.4);
+      const bipodR = this.cyl(0.03, 0.5, this.mats.steelDark, 0.14, -0.2, 1.4);
+      bipodL.rotation.z = 0.3; bipodR.rotation.z = -0.3;
+      turret.add(barrel, bipodL, bipodR);
+      // prone gunner behind the rifle
+      const body = new THREE.Mesh(this.geos.capsule, this.mats.uniform);
+      body.scale.set(0.2, 0.34, 0.2);
+      body.rotation.x = Math.PI / 2 - 0.15;
+      body.position.set(0, 0.24, -1.4);
+      body.castShadow = true;
+      const head = new THREE.Mesh(this.geos.sphere, this.mats.helmet);
+      head.scale.setScalar(0.16);
+      head.position.set(0, 0.42, -1.0);
+      group.add(turret, body, head, soldier(1.0, -1.1));
+      loader = group.children[group.children.length - 1] as THREE.Object3D;
+    } else if (kind === "observer") {
+      // forward observer: map table, tripod spotting scope, radio antenna
+      const table = this.box(1.5, 0.08, 1.0, this.mats.wood, -0.9, 0.85, 0.7);
+      const leg1 = this.cyl(0.04, 0.85, this.mats.wood, -1.4, 0.42, 0.4);
+      const leg2 = this.cyl(0.04, 0.85, this.mats.wood, -0.4, 0.42, 0.4);
+      const leg3 = this.cyl(0.04, 0.85, this.mats.wood, -0.9, 0.42, 1.0);
+      const map = this.box(0.8, 0.02, 0.55, this.mats.barAmber, -0.9, 0.9, 0.7);
+      group.add(table, leg1, leg2, leg3, map);
+      group.add(this.cyl(0.05, 4.6, this.mats.steelDark, 1.2, 2.3, -0.8));
+      group.add(this.box(1.0, 0.04, 0.04, this.mats.steelDark, 1.2, 3.4, -0.8));
+      turret.position.y = 1.25;
+      const tripod = this.cyl(0.05, 1.25, this.mats.steelDark, 0, -0.62, 0);
+      const scope = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
+      scope.scale.set(0.1, 1.0, 0.1);
+      scope.rotation.x = Math.PI / 2;
+      scope.position.set(0, 0.12, 0.35);
+      barrel.add(scope);
+      muzzle.position.set(0, 0.12, 0.9);
+      barrel.add(muzzle);
+      turret.add(tripod, barrel);
+      group.add(turret, soldier(-0.9, 1.6), soldier(0.7, 0.9));
+      loader = group.children[group.children.length - 1] as THREE.Object3D;
+    } else if (kind === "sapper") {
+      // sapper repair post: workbench, vise, spare parts, fuel/parts drums
+      const bench = this.box(2.4, 0.12, 1.1, this.mats.wood, 0, 0.95, -0.6);
+      const bleg1 = this.box(0.14, 0.95, 0.14, this.mats.wood, -1.05, 0.47, -0.6);
+      const bleg2 = this.box(0.14, 0.95, 0.14, this.mats.wood, 1.05, 0.47, -0.6);
+      const vise = this.box(0.3, 0.34, 0.3, this.mats.steelDark, -0.7, 1.2, -0.6);
+      const toolbox = this.box(0.6, 0.3, 0.4, this.mats.olive, 0.5, 1.16, -0.6);
+      const drum1 = this.cyl(0.34, 0.8, this.mats.oliveDark, 1.6, 0.4, 0.5);
+      const drum2 = this.cyl(0.34, 0.8, this.mats.hullDark, -1.6, 0.4, 0.4);
+      const trackPart = this.box(0.9, 0.2, 0.5, this.mats.track, 0, 0.1, 1.1);
+      group.add(bench, bleg1, bleg2, vise, toolbox, drum1, drum2, trackPart);
+      // repair crane arm (turret) that swings toward damaged emplacements
+      turret.position.y = 0;
+      const post = this.cyl(0.09, 2.6, this.mats.steelDark, 0, 1.3, 0.2);
+      const arm = this.box(0.12, 0.12, 1.9, this.mats.steelDark, 0, 2.5, 1.0);
+      const hook = this.cyl(0.03, 0.7, this.mats.steelDark, 0, 2.15, 1.85);
+      turret.add(post, arm, hook);
+      group.add(turret, soldier(-0.4, 1.5), soldier(0.6, 1.3));
+      loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "hedgehog") {
       for (let i = 0; i < 3; i++) {
         const beam = this.box(0.3, 0.3, 3.4, this.mats.steel, 0, 0.9, 0);
@@ -1517,6 +1614,7 @@ export class Engine {
       falling: false, fallVy: 0, hpBar: null,
       phase: rand(0, 2.2), bombs: kind === "heinkel" ? 3 : 0, strafeT: rand(0.4, 1.2),
       armorMul: 1 + (this.waveHpMul - 1) * 0.5,
+      burnT: 0, markT: 0, markMul: 1,
     };
     if (kind === "stuka") {
       e.pos.set(-100, 27, rand(-42, 42));
@@ -1644,12 +1742,9 @@ export class Engine {
     if (ev.code === "KeyU") this.upgradeSelected();
     if (ev.code === "KeyT") this.cycleTargetMode();
     if (ev.code === "KeyB") this.startAbility("artillery");
-    const hk = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7"];
-    const idx = hk.indexOf(ev.code);
-    if (idx >= 0) {
-      const kinds: TowerKind[] = ["mg", "at", "flak", "arty", "airpost", "hedgehog", "wire", "mines"];
-      this.selectBuild(this.buildKind === kinds[idx] ? null : kinds[idx]);
-    }
+    const codeOf = (h: string) => (h === "-" ? "Minus" : h === "=" ? "Equal" : `Digit${h}`);
+    const hot = TOWER_ORDER.find((k) => codeOf(TOWER_DEFS[k].hotkey) === ev.code);
+    if (hot) this.selectBuild(this.buildKind === hot ? null : hot);
     if (ev.code === "Enter" && this.state === "menu") this.startGame();
   };
   private onKeyUp = (ev: KeyboardEvent) => { this.keys[ev.code] = false; };
@@ -1728,7 +1823,7 @@ export class Engine {
   private manualFire(point: THREE.Vector3) {
     const t = this.selected;
     if (!t) return;
-    if (t.kind === "airpost") return; // CAS acts autonomously
+    if (t.kind === "airpost" || t.kind === "observer" || t.kind === "sapper" || t.kind === "flame") return;
     const dist = t.pos.distanceTo(point);
     const range = t.def.range * t.rangeMul;
     if (dist > range * 1.06) {
@@ -1960,6 +2055,16 @@ export class Engine {
     } else if (t.kind === "airpost") {
       // tier0 → rocket rails (fired once tier >= 1), tier1 → veteran pilot, tier2 → second plane
       if (t.tier === 1) { t.rofMul *= 1.45; }
+    } else if (t.kind === "flame") {
+      if (t.tier === 0) { this.burnDps = 10; }                       // napalm
+      else if (t.tier === 1) { t.maxAmmo += 80; t.ammo = t.maxAmmo; } // fuel tanks
+      else { t.maxHp += 140; t.hp = t.maxHp; t.rangeMul *= 1.25; }     // shielding
+    } else if (t.kind === "atrifle") {
+      if (t.tier === 0) { t.penMul *= 1.7; t.dmgMul *= 1.25; }
+      else if (t.tier === 1) { t.rofMul *= 1.45; }
+      else { t.maxHp += 120; t.hp = t.maxHp; t.rangeMul *= 1.2; }
+    } else if (t.kind === "sapper") {
+      if (t.tier === 1) { t.maxHp += 150; t.hp = t.maxHp; }
     }
     t.tier++;
     sfx.play("upgrade");
@@ -2199,6 +2304,21 @@ export class Engine {
       e.flashT = Math.max(0, e.flashT - dt);
       const pulse = e.flashT > 0 ? 1.07 : 1;
       e.group.scale.setScalar(pulse);
+      e.markT = Math.max(0, e.markT - dt);
+
+      // napalm burn damage-over-time (flamethrower)
+      if (e.burnT > 0 && !e.flying && !e.falling) {
+        e.burnT -= dt;
+        e.hp -= this.burnDps * dt;
+        if (Math.random() < dt * 14) {
+          this.spawnSpark(
+            e.pos.clone().add(new THREE.Vector3(rand(-0.8, 0.8), rand(0.4, 1.6), rand(-0.8, 0.8))),
+            new THREE.Vector3(rand(-1.4, 1.4), rand(2.5, 5), rand(-1.4, 1.4)),
+            0.3, rand(0.3, 0.55), Math.random() < 0.6 ? new THREE.Color(1, 0.55, 0.15) : new THREE.Color(1, 0.85, 0.3), 8,
+          );
+        }
+        if (e.hp <= 0) { this.killEnemy(e); continue; }
+      }
 
       if (e.falling) {
         // death spiral: accelerating fall, tightening turn, increasing roll and nose-down
@@ -2407,6 +2527,128 @@ export class Engine {
     }
   }
 
+  // ── support emplacements ──────────────────────────────────────────────────
+  private updateFlame(t: Tower, dt: number) {
+    const range = t.def.range * t.rangeMul;
+    // find nearest ground target in reach
+    let target: Enemy | null = null;
+    let bestD = range;
+    for (const e of this.enemies) {
+      if (e.dead || e.flying || e.falling) continue;
+      const d = e.pos.distanceTo(t.pos) - e.def.radius;
+      if (d < bestD) { bestD = d; target = e; }
+    }
+    if (target) {
+      const want = Math.atan2(target.pos.x - t.pos.x, target.pos.z - t.pos.z);
+      const rate = t.def.traverse * t.travMul * 3.2;
+      t.turret.rotation.y = angLerp(t.turret.rotation.y, want, rate * dt);
+    }
+    const aligned = target && Math.abs(angDiff(t.turret.rotation.y, Math.atan2(target.pos.x - t.pos.x, target.pos.z - t.pos.z))) < 0.3;
+    const firing = aligned && target && t.ammo > 0;
+    if (firing) {
+      t.ammo = Math.max(0, t.ammo - dt * 7.5);
+      t.flashT = 0.1;
+      t.recoil = 0.4;
+      const yaw = t.turret.rotation.y;
+      const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+      const muzzlePos = new THREE.Vector3(t.pos.x + dir.x * 1.9, t.pos.y + 1.0, t.pos.z + dir.z * 1.9);
+      // flame jet particles
+      for (let i = 0; i < 4; i++) {
+        const spread = rand(-0.22, 0.22);
+        const v = dir.clone().multiplyScalar(rand(11, 17));
+        v.x += Math.cos(yaw) * spread * 12 + rand(-1.5, 1.5);
+        v.z -= Math.sin(yaw) * spread * 12 + rand(-1.5, 1.5);
+        v.y = rand(0.4, 2.6);
+        this.spawnSpark(muzzlePos.clone(), v, rand(0.35, 0.7), rand(0.4, 0.8),
+          Math.random() < 0.5 ? new THREE.Color(1, 0.62, 0.18) : new THREE.Color(1, 0.88, 0.34), rand(3, 6));
+      }
+      if (Math.random() < dt * 9) this.spawnSmoke(muzzlePos.clone().add(dir.clone().multiplyScalar(rand(2, 5))), new THREE.Vector3(rand(-1, 1), 2, rand(-1, 1)), 1.6, 2.0, 0.4, 1.2);
+      this.flashAt(muzzlePos, 30);
+      if (Math.random() < dt * 8) sfx.play("flame");
+      this.addShake(0.02);
+      // cone damage + ignition
+      const napalm = t.tier >= 1;
+      for (const e of this.enemies) {
+        if (e.dead || e.flying || e.falling) continue;
+        const to = e.pos.clone().sub(t.pos);
+        const d = to.length() - e.def.radius;
+        if (d > range) continue;
+        to.normalize();
+        if (to.dot(dir) < 0.55) continue; // outside ~56° cone
+        this.damageEnemy(e, t.def.dmg * t.dmgMul * dt, 999, e.pos, dir);
+        e.burnT = Math.max(e.burnT, napalm ? 3.2 : 2.0);
+      }
+      if (t.ammo === 0) this.onUi({ t: "toast", text: `${t.def.short} FUEL EMPTY — CARRIER DISPATCHED FROM HQ` });
+    }
+    void dt;
+  }
+
+  private updateObserver(t: Tower, dt: number) {
+    t.aiT -= dt;
+    // idle sweep of the spotting scope
+    t.turret.rotation.y += dt * 0.7;
+    const range = t.def.range * t.rangeMul * (t.tier >= 2 ? 1.4 : 1);
+    if (t.aiT <= 0) {
+      t.aiT = 1.1;
+      let marked = 0;
+      const mul = t.tier >= 1 ? 1.35 : 1.25;
+      for (const e of this.enemies) {
+        if (e.dead || e.falling) continue;
+        if (e.pos.distanceTo(t.pos) < range + e.def.radius) {
+          e.markT = 2.4;
+          e.markMul = mul;
+          marked++;
+          if (marked <= 4) this.spawnRingPulse(e.pos.clone().setY(e.pos.y + 0.3), 0xf2b23e);
+        }
+      }
+      if (marked > 0) {
+        // swing scope toward the nearest marked target
+        let near: Enemy | null = null; let nd = range;
+        for (const e of this.enemies) {
+          if (e.dead || e.falling || e.markT <= 0) continue;
+          const d = e.pos.distanceTo(t.pos);
+          if (d < nd) { nd = d; near = e; }
+        }
+        if (near) t.turret.rotation.y = Math.atan2(near.pos.x - t.pos.x, near.pos.z - t.pos.z);
+        sfx.play("click");
+      }
+    }
+  }
+
+  private updateSapper(t: Tower, dt: number) {
+    t.aiT -= dt;
+    const radius = t.def.range * t.rangeMul * (t.tier >= 3 ? 1.5 : 1);
+    const rate = (t.tier >= 1 ? 9 : 5.5) * dt;
+    let working = false;
+    for (const o of this.towers) {
+      if (o === t || o.dead || o.def.structure || o.hp >= o.maxHp) continue;
+      if (o.pos.distanceTo(t.pos) < radius) {
+        o.hp = Math.min(o.maxHp, o.hp + rate);
+        working = true;
+        if (Math.random() < dt * 6) {
+          this.spawnSpark(o.pos.clone().add(new THREE.Vector3(rand(-1, 1), rand(0.5, 2), rand(-1, 1))),
+            new THREE.Vector3(rand(-2, 2), rand(2, 4), rand(-2, 2)), 0.3, 0.4, new THREE.Color(0.6, 1, 0.5), 6);
+        }
+      }
+    }
+    // also patch up nearby defensive structures
+    for (const o of this.towers) {
+      if (o === t || o.dead || !o.def.structure || o.hp >= o.maxHp) continue;
+      if (o.pos.distanceTo(t.pos) < radius) {
+        o.hp = Math.min(o.maxHp, o.hp + rate * 0.6);
+        working = true;
+      }
+    }
+    if (working) {
+      // swing crane arm + pump the repairman
+      t.turret.rotation.y += dt * 1.6;
+      if (t.loader) t.loader.position.y = Math.abs(Math.sin(this.playT * 7)) * 0.2;
+      if (t.aiT <= 0) { t.aiT = 0.55; sfx.play("wrench"); }
+    } else if (t.loader) {
+      t.loader.position.y = 0;
+    }
+  }
+
   private updateTowers(dt: number) {
     for (const t of this.towers) {
       if (t.dead) continue;
@@ -2448,6 +2690,11 @@ export class Engine {
         t.group.add(bar);
         t.hpBar = bar;
       }
+
+      // support emplacements run their own loops instead of firing
+      if (t.kind === "observer") { this.updateObserver(t, dt); continue; }
+      if (t.kind === "sapper") { this.updateSapper(t, dt); continue; }
+      if (t.kind === "flame") { this.updateFlame(t, dt); continue; }
 
       // targeting
       t.aiT -= dt;
