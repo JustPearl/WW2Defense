@@ -2,7 +2,7 @@
 import * as THREE from "three";
 import {
   TOWER_DEFS, ENEMY_DEFS, WAVES, TowerKind, EnemyKind, TowerDef, EnemyDef,
-  SELL_RATIO, CP_MAX, ARTY_COST, RESUPPLY_ALL_COST, BASE_MAX,
+  SELL_RATIO, CP_MAX, ARTY_COST, BASE_MAX,
 } from "./defs";
 import { sfx } from "./audio";
 
@@ -14,9 +14,9 @@ export interface HudData {
 }
 export interface SelData {
   id: number; kind: TowerKind; name: string; hp: number; maxHp: number;
-  ammo: number; maxAmmo: number; tier: number; range: number;
+  ammo: number; maxAmmo: number; tier: number; range: number; minRange: number;
   upgradeName: string | null; upgradeCost: number; upgradeDesc: string;
-  resupplyCost: number; targetMode: string; structure: boolean; sellValue: number;
+  targetMode: string; structure: boolean; sellValue: number; carrier: boolean;
 }
 export interface Stats { kills: number; score: number; wave: number; time: number }
 export type Screen = "menu" | "playing" | "paused" | "over" | "won";
@@ -75,9 +75,9 @@ interface Particle {
   pos: THREE.Vector3; vel: THREE.Vector3; life: number; maxLife: number;
   size: number; grow: number; grav: number; drag: number;
 }
-interface Truck { group: THREE.Group; pos: THREE.Vector3; towerId: number; state: "go" | "back" }
+interface Truck { group: THREE.Group; pos: THREE.Vector3; towerId: number; state: "go" | "unload" | "back"; unloadT: number }
 interface Wreck { group: THREE.Group; life: number; smokeT: number }
-interface Decal { mesh: THREE.Mesh; life: number }
+interface Crater { group: THREE.Group; core: THREE.Mesh; rim: THREE.Mesh; coreMat: THREE.MeshBasicMaterial; rimMat: THREE.MeshLambertMaterial; life: number; maxLife: number }
 
 const GRAV = 22;
 const SPARK_MAX = 260;
@@ -132,11 +132,10 @@ export class Engine {
   private smokes: Particle[] = [];
   private dummy = new THREE.Object3D();
   private flashLights: THREE.PointLight[] = [];
-  private decals: Decal[] = [];
-  private decalGeo = new THREE.CircleGeometry(1, 20);
-  private decalMat = new THREE.MeshBasicMaterial({
-    color: 0x17130c, transparent: true, opacity: 0.55, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
-  });
+  private craters: Crater[] = [];
+  private craterGeo = new THREE.CircleGeometry(1, 26);
+  private craterRimGeo = new THREE.TorusGeometry(1, 0.22, 6, 26);
+  private craterTex!: THREE.Texture;
   private sparkTex!: THREE.Texture;
   private smokeTex!: THREE.Texture;
 
@@ -536,13 +535,54 @@ export class Engine {
     }
     this.scene.add(this.smokeMesh);
 
-    // decal pool
+    // crater texture — charred core, churned dirt ring, radial scorch streaks
+    const cv = document.createElement("canvas");
+    cv.width = cv.height = 256;
+    const cx = cv.getContext("2d")!;
+    const grad = cx.createRadialGradient(128, 128, 4, 128, 128, 128);
+    grad.addColorStop(0, "rgba(10,7,4,0.98)");
+    grad.addColorStop(0.32, "rgba(24,17,9,0.94)");
+    grad.addColorStop(0.55, "rgba(52,38,20,0.82)");
+    grad.addColorStop(0.72, "rgba(74,58,34,0.55)");
+    grad.addColorStop(0.88, "rgba(88,70,42,0.22)");
+    grad.addColorStop(1, "rgba(88,70,42,0)");
+    cx.fillStyle = grad;
+    cx.fillRect(0, 0, 256, 256);
     for (let i = 0; i < 26; i++) {
-      const m = new THREE.Mesh(this.decalGeo, this.decalMat);
-      m.rotation.x = -Math.PI / 2;
-      m.visible = false;
-      this.scene.add(m);
-      this.decals.push({ mesh: m, life: 0 });
+      const a = rand(0, Math.PI * 2), len = rand(0.5, 1.02);
+      cx.strokeStyle = `rgba(14,10,5,${rand(0.18, 0.4).toFixed(2)})`;
+      cx.lineWidth = rand(2, 6);
+      cx.beginPath();
+      cx.moveTo(128 + Math.cos(a) * 30, 128 + Math.sin(a) * 30);
+      cx.lineTo(128 + Math.cos(a) * 128 * len, 128 + Math.sin(a) * 128 * len);
+      cx.stroke();
+    }
+    for (let i = 0; i < 420; i++) {
+      const a = rand(0, Math.PI * 2), rr = Math.sqrt(Math.random()) * 124;
+      const x = 128 + Math.cos(a) * rr, y = 128 + Math.sin(a) * rr;
+      const dark = Math.random() < 0.62;
+      cx.fillStyle = dark ? `rgba(10,7,3,${rand(0.1, 0.4).toFixed(2)})` : `rgba(120,96,58,${rand(0.06, 0.2).toFixed(2)})`;
+      cx.fillRect(x, y, rand(1, 3.4), rand(1, 3.4));
+    }
+    this.craterTex = new THREE.CanvasTexture(cv);
+
+    // crater pool (pooled groups, recycled)
+    this.craterGeo.rotateX(-Math.PI / 2);
+    this.craterRimGeo.rotateX(-Math.PI / 2);
+    for (let i = 0; i < 22; i++) {
+      const coreMat = new THREE.MeshBasicMaterial({
+        map: this.craterTex, transparent: true, opacity: 0, depthWrite: false, polygonOffset: true, polygonOffsetFactor: -4,
+      });
+      const rimMat = new THREE.MeshLambertMaterial({ color: 0x55432a, transparent: true, opacity: 0 });
+      const core = new THREE.Mesh(this.craterGeo, coreMat);
+      core.position.y = 0.06;
+      const rim = new THREE.Mesh(this.craterRimGeo, rimMat);
+      rim.position.y = 0.12;
+      const group = new THREE.Group();
+      group.add(core, rim);
+      group.visible = false;
+      this.scene.add(group);
+      this.craters.push({ group, core, rim, coreMat, rimMat, life: 0, maxLife: 1 });
     }
 
     this.ghostMatOk = new THREE.MeshBasicMaterial({ color: 0xa4c94e, transparent: true, opacity: 0.45, depthWrite: false });
@@ -583,13 +623,28 @@ export class Engine {
   }
 
   private addDecal(pos: THREE.Vector3, r: number) {
-    let d = this.decals.find((x) => x.life <= 0);
-    if (!d) d = this.decals.reduce((a, b) => (a.life < b.life ? a : b));
-    d.mesh.visible = true;
-    d.mesh.position.set(pos.x, this.heightAt(pos.x, pos.z) + 0.07, pos.z);
-    d.mesh.rotation.z = rand(0, 6.28);
-    d.mesh.scale.setScalar(r);
-    d.life = 40;
+    let d = this.craters.find((x) => x.life <= 0);
+    if (!d) d = this.craters.reduce((a, b) => (a.life < b.life ? a : b));
+    const size = Math.max(0.8, r);
+    d.group.visible = true;
+    d.group.position.set(pos.x, this.heightAt(pos.x, pos.z), pos.z);
+    d.group.rotation.y = rand(0, 6.28);
+    d.core.scale.setScalar(size * 1.25);
+    d.rim.scale.set(size * 0.82, 1, size * 0.82);
+    d.rim.position.y = 0.12 + size * 0.05;
+    d.coreMat.opacity = 0.92;
+    d.rimMat.opacity = 0.85;
+    d.life = 30;
+    d.maxLife = 30;
+    // kicked-out dirt clods around the lip
+    for (let i = 0; i < 6; i++) {
+      const a = rand(0, Math.PI * 2);
+      this.spawnSpark(
+        new THREE.Vector3(pos.x + Math.cos(a) * size * 0.5, pos.y + 0.2, pos.z + Math.sin(a) * size * 0.5),
+        new THREE.Vector3(Math.cos(a) * rand(4, 9), rand(5, 10), Math.sin(a) * rand(4, 9)),
+        0.7, rand(0.25, 0.5), new THREE.Color(0.32, 0.24, 0.13), 22,
+      );
+    }
   }
 
   private addShake(n: number) {
@@ -796,12 +851,14 @@ export class Engine {
       group.add(turret, soldier(0, -1.1), soldier(1.15, -0.4));
       loader = group.children[group.children.length - 1] as THREE.Object3D;
     } else if (kind === "at") {
+      // wheels + axle stay planted; the whole carriage pivots on the axle
       const w1 = this.cyl(0.55, 0.26, this.mats.track, -0.85, 0.55, 0);
       w1.rotation.z = Math.PI / 2;
       const w2 = w1.clone(); w2.position.x = 0.85;
-      group.add(w1, w2);
-      group.add(this.box(1.5, 0.5, 2.6, this.mats.hullDark, 0, 0.55, -0.6));
+      group.add(w1, w2, this.cyl(0.15, 1.8, this.mats.steelDark, 0, 0.55, 0));
       turret.position.y = 0.95;
+      const trail = this.box(1.5, 0.5, 2.6, this.mats.hullDark, 0, -0.4, -0.6);
+      const spade = this.box(1.5, 0.75, 0.18, this.mats.steelDark, 0, -0.5, -1.98);
       const shield = this.box(1.7, 1.05, 0.1, this.mats.hull, 0, 0.5, 0.55);
       shield.rotation.x = -0.14;
       const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
@@ -813,9 +870,13 @@ export class Engine {
       barrel.add(muzzle);
       breech = this.box(0.42, 0.4, 0.5, this.mats.steelDark, 0, 0.42, 0.1);
       barrel.add(breech);
-      turret.add(shield, barrel);
-      group.add(turret, soldier(-1.15, -0.9), soldier(1.1, -0.7, true));
-      loader = group.children[group.children.length - 2] as THREE.Object3D;
+      turret.add(trail, spade, shield, barrel);
+      // crew rides with the carriage
+      const gunner = soldier(0, -1.5, true); gunner.position.y = -0.95;
+      const load = soldier(1.1, -0.7); load.position.y = -0.95;
+      turret.add(gunner, load);
+      group.add(turret, soldier(-1.35, -0.4));
+      loader = load;
     } else if (kind === "flak") {
       for (let i = 0; i < 4; i++) {
         const arm = this.box(0.5, 0.24, 3.4, this.mats.hullDark, 0, 0.12, 0);
@@ -841,6 +902,39 @@ export class Engine {
       turret.add(pivot);
       elevNode = pivot;
       group.add(turret, soldier(1.3, -0.8), soldier(-1.3, -0.8), soldier(0, -1.5));
+      loader = group.children[group.children.length - 2] as THREE.Object3D;
+    } else if (kind === "arty") {
+      // heavy base platform with four outrigger pads
+      group.add(this.cyl(2.1, 0.26, this.mats.hullDark, 0, 0.13, 0));
+      for (let i = 0; i < 4; i++) {
+        const a = Math.PI / 4 + (i * Math.PI) / 2;
+        const arm = this.box(0.42, 0.22, 3.1, this.mats.hullDark, 0, 0.18, 0);
+        arm.rotation.y = a;
+        arm.position.set(Math.sin(a) * 1.1, 0.18, Math.cos(a) * 1.1);
+        group.add(arm);
+        group.add(this.box(0.72, 0.3, 0.72, this.mats.steel, Math.sin(a) * 2.35, 0.15, Math.cos(a) * 2.35));
+      }
+      group.add(this.cyl(0.9, 0.95, this.mats.hull, 0, 0.73, 0));
+      turret.position.y = 1.25;
+      const pivot = new THREE.Group();
+      pivot.rotation.x = -1.05; // high-angle howitzer mount
+      const cradle = this.box(0.64, 0.64, 1.6, this.mats.hull, 0, 0, -0.35);
+      const tube = new THREE.Mesh(this.geos.cyl, this.mats.gunmetal);
+      tube.scale.set(0.14, 3.9, 0.14);
+      tube.rotation.x = Math.PI / 2;
+      tube.position.set(0, 0, 2.05);
+      const brake = this.cyl(0.2, 0.34, this.mats.steelDark, 0, 0, 3.95);
+      brake.rotation.x = Math.PI / 2;
+      barrel.add(cradle, tube, brake);
+      muzzle.position.set(0, 0, 4.35);
+      barrel.add(muzzle);
+      barrel.add(this.box(1.5, 1.05, 0.1, this.mats.hull, 0, -0.2, 0.3));
+      breech = this.box(0.56, 0.56, 0.72, this.mats.steelDark, 0, 0, -0.6);
+      barrel.add(breech);
+      pivot.add(barrel);
+      turret.add(pivot);
+      elevNode = pivot;
+      group.add(turret, soldier(1.6, -0.9), soldier(-1.6, -0.9), soldier(0, -1.9));
       loader = group.children[group.children.length - 2] as THREE.Object3D;
     } else if (kind === "hedgehog") {
       for (let i = 0; i < 3; i++) {
@@ -948,7 +1042,8 @@ export class Engine {
       hp: def.hp, maxHp: def.hp, ammo: def.ammo, maxAmmo: def.ammo,
       cooldown: 0, reloadT: 0, reloadMax: def.rof > 0 ? 1 / def.rof : 0, aiT: Math.random() * 0.12,
       tier: 0, dmgMul: 1, penMul: 1, rofMul: 1, rangeMul: 1, splashMul: 1, travMul: 1, airPriority: false,
-      targetMode: 0, target: null, recoil: 0, flashT: 0, elev: kind === "flak" ? 0.55 : 0,
+      targetMode: 0, target: null, recoil: 0, flashT: 0,
+      elev: kind === "flak" ? 0.55 : kind === "arty" ? 1.05 : 0,
       dead: false, invested: def.cost, hpBar: null,
     };
     this.towers.push(t);
@@ -1110,6 +1205,15 @@ export class Engine {
       sfx.play("cannon");
       this.addShake(0.32);
       this.spawnSmoke(muzzlePos.clone(), new THREE.Vector3(rand(-2, 2), rand(0.5, 1.5), rand(-2, 2)), 1.1, 1.6, 0.6);
+    } else if (def.kind === "arty") {
+      mesh = new THREE.Mesh(this.projGeoShell, this.projMatShell);
+      sfx.play("cannon");
+      sfx.play("whistle");
+      this.addShake(0.55);
+      for (let i = 0; i < 3; i++) {
+        this.spawnSmoke(muzzlePos.clone(), new THREE.Vector3(rand(-2.5, 2.5), rand(1.5, 3), rand(-2.5, 2.5)), rand(1.4, 2), rand(1.8, 2.6), 0.55);
+      }
+      this.burst(muzzlePos, 12, 10, 0.2, 2.2, new THREE.Color(1, 0.85, 0.55), 3);
     } else {
       mesh = new THREE.Mesh(this.projGeoShell, this.projMatShell);
       kind = "flak";
@@ -1125,8 +1229,8 @@ export class Engine {
     const p: Proj = {
       mesh, pos: muzzlePos.clone(), vel,
       dmg: def.dmg * t.dmgMul * (manual ? 1.35 : 1), pen: def.pen * t.penMul,
-      splash: def.splash * (def.kind === "flak" ? t.splashMul : 1),
-      splashDmg: def.splashDmg * (def.kind === "flak" ? t.splashMul : 1) * (manual ? 1.35 : 1),
+      splash: def.splash * (def.kind === "flak" || def.kind === "arty" ? t.splashMul : 1),
+      splashDmg: def.splashDmg * (def.kind === "flak" || def.kind === "arty" ? t.splashMul : 1) * (manual ? 1.35 : 1),
       kind, life: 4, manual, dead: false,
     };
     this.projs.push(p);
@@ -1142,7 +1246,7 @@ export class Engine {
         this.spawnSmoke(new THREE.Vector3(t.pos.x + rand(-1.4, 1.4), t.pos.y + 0.3, t.pos.z + rand(-1.4, 1.4)), new THREE.Vector3(rand(-1, 1), 1.2, rand(-1, 1)), 1.4, 1.3, 0.62, 1.6);
       }
     }
-    if (t.ammo === 0) this.onUi({ t: "toast", text: `${def.short} OUT OF AMMO — RESUPPLY [R]` });
+    if (t.ammo === 0) this.onUi({ t: "toast", text: `${def.short} OUT OF AMMO — CARRIER DISPATCHED FROM HQ` });
   }
 
   private rofMulOf(t: Tower): number {
@@ -1165,13 +1269,12 @@ export class Engine {
     if (ev.code === "KeyF") this.toggleSpeed();
     if (ev.code === "KeyM") this.toggleMute();
     if (ev.code === "KeyU") this.upgradeSelected();
-    if (ev.code === "KeyR") this.resupplySelected();
     if (ev.code === "KeyT") this.cycleTargetMode();
     if (ev.code === "KeyB") this.startAbility("artillery");
-    const hk = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6"];
+    const hk = ["Digit1", "Digit2", "Digit3", "Digit4", "Digit5", "Digit6", "Digit7"];
     const idx = hk.indexOf(ev.code);
     if (idx >= 0) {
-      const kinds: TowerKind[] = ["mg", "at", "flak", "hedgehog", "wire", "mines"];
+      const kinds: TowerKind[] = ["mg", "at", "flak", "arty", "hedgehog", "wire", "mines"];
       this.selectBuild(this.buildKind === kinds[idx] ? null : kinds[idx]);
     }
     if (ev.code === "Enter" && this.state === "menu") this.startGame();
@@ -1260,6 +1363,12 @@ export class Engine {
       this.spawnRingPulse(point, 0xe5484d);
       return;
     }
+    if (t.def.minRange > 0 && dist < t.def.minRange) {
+      sfx.play("denied");
+      this.onUi({ t: "toast", text: "INSIDE MINIMUM RANGE — NO FIRE" });
+      this.spawnRingPulse(point, 0xe5484d);
+      return;
+    }
     if (t.cooldown > 0 || t.ammo <= 0) {
       sfx.play("click");
       return;
@@ -1311,7 +1420,7 @@ export class Engine {
     this.ringPulses = [];
     for (const s of this.sparks) s.life = 0;
     for (const s of this.smokes) s.life = 0;
-    for (const d of this.decals) { d.life = 0; d.mesh.visible = false; }
+    for (const c of this.craters) { c.life = 0; c.group.visible = false; c.coreMat.opacity = 0; c.rimMat.opacity = 0; }
     this.rp = 400; this.cp = 2; this.baseHp = BASE_MAX; this.kills = 0; this.score = 0; this.playT = 0;
     this.waveIdx = -1; this.waveT = 0; this.between = true; this.nextIn = 12;
     this.spawnQueue = []; this.endT = -1;
@@ -1423,19 +1532,6 @@ export class Engine {
     this.startAbility(null);
   }
 
-  resupplyAll() {
-    if (this.cp < RESUPPLY_ALL_COST) {
-      sfx.play("denied");
-      this.onUi({ t: "toast", text: "NOT ENOUGH COMMAND POINTS" });
-      return;
-    }
-    this.cp -= RESUPPLY_ALL_COST;
-    for (const t of this.towers) if (!t.dead && t.def.ammo > 0) t.ammo = t.maxAmmo;
-    sfx.play("horn");
-    this.onUi({ t: "banner", text: "EMERGENCY RESUPPLY", sub: "All emplacements reloaded.", tone: "good" });
-    this.pushHud();
-  }
-
   callEarly() {
     if (!this.between || this.state !== "playing") return;
     this.nextIn = 0;
@@ -1482,6 +1578,10 @@ export class Engine {
       if (t.tier === 0) { t.splashMul *= 1.7; }
       else if (t.tier === 1) { t.rofMul *= 1.3; t.travMul *= 1.3; }
       else { t.rangeMul *= 1.25; t.dmgMul *= 1.2; t.airPriority = true; }
+    } else if (t.kind === "arty") {
+      if (t.tier === 0) { t.splashMul *= 1.6; }
+      else if (t.tier === 1) { t.maxHp += 180; t.hp = t.maxHp; }
+      else { t.rangeMul *= 1.25; t.rofMul *= 1.35; }
     }
     t.tier++;
     sfx.play("upgrade");
@@ -1490,27 +1590,27 @@ export class Engine {
     this.pushHud();
   }
 
-  resupplySelected() {
-    const t = this.selected;
-    if (!t || t.dead || t.def.structure || t.def.ammo === 0) return;
-    if (t.ammo >= t.maxAmmo) {
-      this.onUi({ t: "toast", text: "AMMUNITION FULL" });
-      return;
+  private logT = 0;
+  // autonomous logistics: ammunition carriers haul rounds from HQ to low emplacements
+  private updateLogistics(dt: number) {
+    this.logT -= dt;
+    if (this.logT > 0) return;
+    this.logT = 1.1;
+    if (this.trucks.filter((tr) => tr.state !== "back").length >= 3) return;
+    let best: Tower | null = null;
+    let bestRatio = 1;
+    for (const t of this.towers) {
+      if (t.dead || t.def.ammo === 0) continue;
+      if (this.trucks.some((tr) => tr.towerId === t.id)) continue;
+      const ratio = t.ammo / t.maxAmmo;
+      if (ratio < 0.32 && ratio < bestRatio) { bestRatio = ratio; best = t; }
     }
-    if (this.trucks.some((tr) => tr.towerId === t.id)) {
-      this.onUi({ t: "toast", text: "TRUCK ALREADY EN ROUTE" });
-      return;
+    if (best) {
+      this.spawnTruck(best.id);
+      sfx.play("horn");
+      this.onUi({ t: "toast", text: `AMMUNITION CARRIER → ${best.def.short}` });
+      this.pushHud();
     }
-    if (this.rp < t.def.resupplyCost) {
-      sfx.play("denied");
-      this.onUi({ t: "toast", text: "INSUFFICIENT REQUISITION POINTS" });
-      return;
-    }
-    this.rp -= t.def.resupplyCost;
-    this.spawnTruck(t.id);
-    sfx.play("horn");
-    this.onUi({ t: "toast", text: "SUPPLY TRUCK DISPATCHED" });
-    this.pushHud();
   }
 
   sellSelected() {
@@ -1542,9 +1642,12 @@ export class Engine {
     const cab = this.box(1.5, 1.2, 1.4, this.mats.olive, 0, 1.0, 1.1);
     cab.castShadow = true;
     const bed = this.box(1.7, 0.9, 2.4, this.mats.oliveDark, 0, 0.85, -0.7);
-    const crate1 = this.box(0.8, 0.7, 0.8, this.mats.wood, -0.4, 1.6, -0.7);
-    const crate2 = this.box(0.7, 0.6, 0.7, this.mats.wood, 0.45, 1.55, -0.5);
-    g.add(cab, bed, crate1, crate2);
+    // ammunition crates with stencil stripes
+    const crate1 = this.box(0.85, 0.62, 0.85, this.mats.oliveDark, -0.38, 1.62, -0.7);
+    const stripe1 = this.box(0.87, 0.12, 0.87, this.mats.amber, -0.38, 1.62, -0.7);
+    const crate2 = this.box(0.7, 0.55, 0.7, this.mats.olive, 0.45, 1.58, -0.55);
+    const stripe2 = this.box(0.72, 0.1, 0.72, this.mats.amber, 0.45, 1.58, -0.55);
+    g.add(cab, bed, crate1, stripe1, crate2, stripe2);
     for (const sx of [-0.8, 0.8]) for (const sz of [-1.4, 0.9]) {
       const w = this.cyl(0.34, 0.22, this.mats.dark, sx, 0.34, sz);
       w.rotation.z = Math.PI / 2;
@@ -1553,7 +1656,7 @@ export class Engine {
     const start = this.hq.position.clone();
     g.position.copy(start);
     this.dyn.add(g);
-    this.trucks.push({ group: g, pos: start.clone(), towerId, state: "go" });
+    this.trucks.push({ group: g, pos: start.clone(), towerId, state: "go", unloadT: 0 });
   }
 
   private getStats(): Stats {
@@ -1571,9 +1674,11 @@ export class Engine {
         ammo: sel.ammo, maxAmmo: sel.maxAmmo, tier: sel.tier,
         range: Math.round(sel.def.range * sel.rangeMul),
         upgradeName: up ? up.name : null, upgradeCost: up ? up.cost : 0,
-        upgradeDesc: up ? up.desc : "", resupplyCost: sel.def.resupplyCost,
+        upgradeDesc: up ? up.desc : "",
         targetMode: TARGET_MODES[sel.targetMode], structure: sel.def.structure,
         sellValue: Math.round(sel.invested * SELL_RATIO),
+        minRange: sel.def.minRange,
+        carrier: this.trucks.some((tr) => tr.towerId === sel.id && tr.state !== "back"),
       };
     }
     const hostiles = this.spawnQueue.length + this.enemies.filter((e) => !e.dead).length;
@@ -1863,7 +1968,9 @@ export class Engine {
       // targeting
       t.aiT -= dt;
       const range = t.def.range * t.rangeMul;
-      if (t.aiT <= 0 || (t.target && (t.target.dead || t.pos.distanceTo(t.pos) > range * 1.1))) {
+      if (t.aiT <= 0 || (t.target && (t.target.dead
+        || t.target.pos.distanceTo(t.pos) > range * 1.1
+        || t.target.pos.distanceTo(t.pos) < t.def.minRange))) {
         t.aiT = 0.12;
         let best: Enemy | null = null;
         let bestVal = -1e9;
@@ -1871,7 +1978,7 @@ export class Engine {
           if (e.dead || e.falling) continue;
           if (e.flying && !t.def.antiAir) continue;
           const d = e.pos.distanceTo(t.pos);
-          if (d > range) continue;
+          if (d > range || d < t.def.minRange + 1.5) continue;
           let val = 0;
           if (t.targetMode === 0) val = e.dist + (t.airPriority && e.flying ? 1e5 : 0);
           else if (t.targetMode === 1) val = -d + (t.airPriority && e.flying ? 1e5 : 0);
@@ -1893,8 +2000,8 @@ export class Engine {
         const muzzleY = t.pos.y + (t.kind === "flak" ? 1.1 : t.kind === "at" ? 1.37 : 1.28);
         const hd = Math.hypot(aim.x - t.pos.x, aim.z - t.pos.z);
         const rawE = Math.atan2(aim.y - muzzleY, Math.max(1, hd));
-        const maxE = t.kind === "flak" ? 1.3 : 0.5;
-        const minE = t.kind === "flak" ? -0.1 : -0.28;
+        const maxE = t.kind === "flak" ? 1.3 : t.kind === "arty" ? 1.22 : 0.5;
+        const minE = t.kind === "flak" ? -0.1 : t.kind === "arty" ? 0.85 : -0.28;
         elevDes = clamp(rawE, minE, maxE);
         pitchOk = Math.abs(t.elev - elevDes) < 0.22;
         const aligned = Math.abs(angDiff(t.turret.rotation.y, want)) < 0.14;
@@ -1987,9 +2094,27 @@ export class Engine {
   }
 
   private updateTrucks(dt: number) {
+    this.updateLogistics(dt);
     for (let i = this.trucks.length - 1; i >= 0; i--) {
       const tr = this.trucks[i];
       const tower = this.towers.find((t) => t.id === tr.towerId && !t.dead);
+      if (tr.state === "unload") {
+        tr.unloadT -= dt;
+        if (Math.random() < dt * 10) {
+          this.burst(tr.pos.clone().setY(tr.pos.y + 1.7), 2, 2, 0.3, 0.35, new THREE.Color(0.9, 0.8, 0.5), 3);
+        }
+        if (tr.unloadT <= 0) {
+          if (tower && !tower.dead) {
+            tower.ammo = tower.maxAmmo;
+            sfx.play("reload");
+            this.onUi({ t: "toast", text: `${tower.def.short} REARMED` });
+            this.burst(tower.pos.clone().setY(tower.pos.y + 1.5), 8, 4, 0.4, 0.4, new THREE.Color(0.6, 1, 0.5), 4);
+          }
+          tr.state = "back";
+          this.pushHud();
+        }
+        continue;
+      }
       const dest = tr.state === "go"
         ? (tower ? tower.pos : this.hq.position)
         : this.hq.position;
@@ -1997,13 +2122,9 @@ export class Engine {
       const d = Math.hypot(dx, dz);
       if (d < 1.6) {
         if (tr.state === "go") {
-          if (tower && !tower.dead) {
-            tower.ammo = tower.maxAmmo;
-            sfx.play("reload");
-            this.onUi({ t: "toast", text: `${tower.def.short} RESUPPLIED` });
-            this.burst(tower.pos.clone().setY(tower.pos.y + 1.5), 8, 4, 0.4, 0.4, new THREE.Color(0.6, 1, 0.5), 4);
-          }
-          tr.state = "back";
+          tr.state = "unload";
+          tr.unloadT = 1.3;
+          sfx.play("click");
         } else {
           this.dyn.remove(tr.group);
           this.trucks.splice(i, 1);
@@ -2070,11 +2191,16 @@ export class Engine {
 
     for (const l of this.flashLights) l.intensity *= Math.exp(-11 * rdt);
 
-    for (const d of this.decals) {
-      if (d.life > 0) {
-        d.life -= rdt;
-        if (d.life <= 0) d.mesh.visible = false;
-        else if (d.life < 4) (d.mesh.material as THREE.MeshBasicMaterial).opacity = d.life / 4 * 0.55;
+    for (const c of this.craters) {
+      if (c.life > 0) {
+        c.life -= rdt;
+        if (c.life <= 0) { c.group.visible = false; continue; }
+        // gradual fade over the full lifetime, rim settles into the mud
+        const k = c.life / c.maxLife;
+        const fade = k < 0.55 ? k / 0.55 : 1;
+        c.coreMat.opacity = 0.92 * fade;
+        c.rimMat.opacity = 0.85 * fade;
+        c.rim.position.y = 0.12 + (c.rim.scale.x / 0.82) * 0.05 * k;
       }
     }
 
@@ -2203,6 +2329,15 @@ export class Engine {
           const ring = this.makeRangeRing(def.range);
           this.ghost.add(ring);
           this.ghost.userData.ring = ring;
+          if (def.minRange > 0) {
+            const dz = new THREE.Mesh(
+              new THREE.RingGeometry(def.minRange - 0.35, def.minRange, 48),
+              new THREE.MeshBasicMaterial({ color: 0xe5484d, transparent: true, opacity: 0.5, side: THREE.DoubleSide, depthWrite: false }),
+            );
+            dz.rotation.x = -Math.PI / 2;
+            dz.position.y = 0.16;
+            ring.add(dz);
+          }
         }
         const ring = this.ghost.userData.ring as THREE.Group;
         ring.position.y = 0.15;

@@ -3,7 +3,7 @@ import {
   Engine, HudData, SelData, Stats, Screen, UiMsg,
 } from "./game/engine";
 import {
-  TOWER_DEFS, TOWER_ORDER, WAVES, TowerKind, CP_MAX, ARTY_COST, RESUPPLY_ALL_COST,
+  TOWER_DEFS, TOWER_ORDER, WAVES, TowerKind, CP_MAX, ARTY_COST,
 } from "./game/defs";
 
 // ── ui state ────────────────────────────────────────────────────────────────
@@ -107,8 +107,8 @@ function ControlsGuide({ compact = false }: { compact?: boolean }) {
     ["LEFT CLICK", "Place / Select / Manual fire"],
     ["RIGHT CLICK / ESC", "Cancel / Deselect"],
     ["SPACE", "Tactical pause (orders still work)"],
-    ["1–6", "Arm emplacement blueprint"],
-    ["U / R / T", "Upgrade / Resupply / Targeting"],
+    ["1–7", "Arm emplacement blueprint"],
+    ["U / T", "Upgrade / Targeting"],
     ["B", "Artillery strike mode"],
     ["F / M", "Game speed / Mute"],
   ];
@@ -263,12 +263,35 @@ export default function App() {
                       <span className={`hud-num ${sel.ammo === 0 ? "pulse-warn" : "text-[var(--paper)]"}`}>{sel.ammo}/{sel.maxAmmo}</span>
                     </div>
                     <Bar pct={sel.ammo / sel.maxAmmo} cls="amber" />
+                    {sel.ammo / sel.maxAmmo < 0.32 && !sel.carrier && (
+                      <div className="mt-0.5 text-[9px] tracking-widest text-[var(--dim)]">CARRIER QUEUED AT HQ…</div>
+                    )}
+                    {sel.carrier && (
+                      <div className="mt-0.5 flex items-center gap-1 text-[9px] font-bold tracking-widest text-[var(--olive)]">
+                        <span className="inline-block h-1.5 w-1.5 animate-pulse bg-[var(--olive)]" />
+                        AMMUNITION CARRIER EN ROUTE
+                      </div>
+                    )}
                   </div>
                 )}
                 <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[var(--dim)]">
                   <span>RANGE</span><span className="hud-num text-right text-[var(--paper)]">{sel.range} m</span>
-                  <span>TARGETING</span><span className="hud-num text-right text-[var(--amber)]">{sel.targetMode}</span>
+                  {sel.minRange > 0 ? (
+                    <>
+                      <span className="text-[var(--red-hi)]">DEAD ZONE</span>
+                      <span className="hud-num text-right text-[var(--red-hi)]">&lt; {sel.minRange} m</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>TARGETING</span><span className="hud-num text-right text-[var(--amber)]">{sel.targetMode}</span>
+                    </>
+                  )}
                 </div>
+                {sel.minRange > 0 && (
+                  <div className="-mt-0.5 text-[9px] tracking-wider text-[var(--dim)]">
+                    LONG-RANGE PIECE — WILL NOT ENGAGE INSIDE {sel.minRange} m
+                  </div>
+                )}
               </div>
               <div className="mt-3 space-y-1.5">
                 {sel.upgradeName && (
@@ -280,15 +303,10 @@ export default function App() {
                 {!sel.upgradeName && !sel.structure && <div className="text-center text-[10px] tracking-widest text-[var(--olive)]">FULLY UPGRADED</div>}
                 {!sel.structure && (
                   <>
-                    <button className="btn w-full py-1.5 text-[10px]" disabled={sel.ammo >= sel.maxAmmo} onClick={() => eng()?.resupplySelected()}>
-                      {ICONS.truck} SUPPLY TRUCK — {sel.resupplyCost} RP [R]
-                    </button>
                     <button className="btn w-full py-1.5 text-[10px]" onClick={() => eng()?.cycleTargetMode()}>
                       TARGETING: {sel.targetMode} [T]
                     </button>
-                    {!sel.structure && (
-                      <div className="text-center text-[9px] text-[var(--dim)]">CLICK MAP TO FIRE MANUALLY (+35% DMG)</div>
-                    )}
+                    <div className="text-center text-[9px] text-[var(--dim)]">CLICK MAP TO FIRE MANUALLY (+35% DMG)</div>
                   </>
                 )}
                 <button className="btn btn-danger w-full py-1.5 text-[10px]" onClick={() => eng()?.sellSelected()}>
@@ -327,13 +345,6 @@ export default function App() {
               <div className={`mx-auto ${ui.ability === "artillery" ? "text-[var(--amber-hi)]" : "text-[var(--red-hi)]"}`}>{ICONS.arty}</div>
               <div className="mt-1 text-[9px] font-bold tracking-wider text-[var(--paper)]">ARTILLERY</div>
               <div className="hud-num text-[10px] font-bold text-[var(--amber)]">{ARTY_COST} CP</div>
-            </div>
-            <div className={`card ${hud.cp < RESUPPLY_ALL_COST ? "broke" : ""}`}
-              onClick={() => eng()?.resupplyAll()}
-              title="Emergency resupply — refill all emplacements">
-              <div className="mx-auto text-[var(--olive)]">{ICONS.truck}</div>
-              <div className="mt-1 text-[9px] font-bold tracking-wider text-[var(--paper)]">RESUPPLY</div>
-              <div className="hud-num text-[10px] font-bold text-[var(--amber)]">{RESUPPLY_ALL_COST} CP</div>
             </div>
           </div>
 

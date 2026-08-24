@@ -1,6 +1,6 @@
 // ── Steel & Tactics — data definitions ──────────────────────────────────────
 
-export type TowerKind = "mg" | "at" | "flak" | "hedgehog" | "wire" | "mines";
+export type TowerKind = "mg" | "at" | "flak" | "arty" | "hedgehog" | "wire" | "mines";
 export type EnemyKind = "infantry" | "scout" | "halftrack" | "panzer" | "panther" | "stuka";
 
 export interface UpgradeDef { name: string; desc: string; cost: number }
@@ -19,22 +19,22 @@ export interface TowerDef {
   splash: number; // splash radius (0 = single target)
   splashDmg: number;
   projSpeed: number;
-  lob: number; // initial vertical velocity add
+  lob: number; // ballistic arc factor (higher = steeper, slower flight)
   ammo: number;
-  resupplyCost: number;
   antiAir: boolean;
   structure: boolean;
   traverse: number; // rad/s
+  minRange: number; // 0 = can engage at point-blank; else dead zone radius
   upgrades: UpgradeDef[];
 }
 
-export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "hedgehog", "wire", "mines"];
+export const TOWER_ORDER: TowerKind[] = ["mg", "at", "flak", "arty", "hedgehog", "wire", "mines"];
 
 export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   mg: {
     kind: "mg", name: "M2 .50 CAL MG NEST", short: "MG NEST", hotkey: "1",
     cost: 120, hp: 130, range: 26, rof: 6.5, dmg: 4, pen: 6, splash: 0, splashDmg: 0,
-    projSpeed: 95, lob: 0, ammo: 260, resupplyCost: 25, antiAir: true, structure: false, traverse: 4.2,
+    projSpeed: 95, lob: 0, ammo: 260, antiAir: true, structure: false, traverse: 4.2, minRange: 0,
     upgrades: [
       { name: "API ROUNDS", desc: "+60% damage, +4 pen", cost: 150 },
       { name: "SANDBAG REINFORCEMENT", desc: "+120 max HP, full repair", cost: 130 },
@@ -44,7 +44,7 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   at: {
     kind: "at", name: "PaK 40 75mm AT GUN", short: "PaK 40", hotkey: "2",
     cost: 300, hp: 170, range: 40, rof: 0.34, dmg: 58, pen: 85, splash: 0, splashDmg: 0,
-    projSpeed: 125, lob: 5, ammo: 18, resupplyCost: 45, antiAir: false, structure: false, traverse: 1.5,
+    projSpeed: 125, lob: 5, ammo: 18, antiAir: false, structure: false, traverse: 1.5, minRange: 0,
     upgrades: [
       { name: "APCR AMMUNITION", desc: "+60% pen, +25% damage", cost: 260 },
       { name: "CONCRETE CASEMATE", desc: "+160 max HP, full repair", cost: 210 },
@@ -54,29 +54,39 @@ export const TOWER_DEFS: Record<TowerKind, TowerDef> = {
   flak: {
     kind: "flak", name: "8.8cm FLAK 36", short: "FLAK 88", hotkey: "3",
     cost: 420, hp: 190, range: 46, rof: 0.55, dmg: 42, pen: 68, splash: 4.5, splashDmg: 26,
-    projSpeed: 105, lob: 9, ammo: 24, resupplyCost: 55, antiAir: true, structure: false, traverse: 2.2,
+    projSpeed: 105, lob: 9, ammo: 24, antiAir: true, structure: false, traverse: 2.2, minRange: 0,
     upgrades: [
       { name: "TIME-FUSE SHELLS", desc: "+70% splash damage & radius", cost: 260 },
       { name: "ZUGAPP TRAILER MOUNT", desc: "+30% traverse & fire rate", cost: 230 },
       { name: "RADAR INTEGRATION", desc: "+25% range & damage, air priority", cost: 310 },
     ],
   },
+  arty: {
+    kind: "arty", name: "M114 155mm HOWITZER", short: "HOWITZER", hotkey: "4",
+    cost: 520, hp: 210, range: 74, rof: 0.2, dmg: 26, pen: 95, splash: 7, splashDmg: 90,
+    projSpeed: 74, lob: 46, ammo: 14, antiAir: false, structure: false, traverse: 0.9, minRange: 22,
+    upgrades: [
+      { name: "IMPROVED HE SHELLS", desc: "+60% splash damage & radius", cost: 300 },
+      { name: "REINFORCED EMPLACEMENT", desc: "+180 max HP, full repair", cost: 240 },
+      { name: "FDC FIRE CONTROL", desc: "+25% range, +35% fire rate", cost: 330 },
+    ],
+  },
   hedgehog: {
-    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "4",
+    kind: "hedgehog", name: "CZECH HEDGEHOGS", short: "HEDGEHOG", hotkey: "5",
     cost: 40, hp: 90, range: 3.2, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
-    projSpeed: 0, lob: 0, ammo: 0, resupplyCost: 0, antiAir: false, structure: true, traverse: 0,
+    projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   wire: {
-    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "5",
+    kind: "wire", name: "BARBED WIRE", short: "WIRE", hotkey: "6",
     cost: 30, hp: 45, range: 3.6, rof: 0, dmg: 0, pen: 0, splash: 0, splashDmg: 0,
-    projSpeed: 0, lob: 0, ammo: 0, resupplyCost: 0, antiAir: false, structure: true, traverse: 0,
+    projSpeed: 0, lob: 0, ammo: 0, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
   mines: {
-    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "6",
+    kind: "mines", name: "AT MINEFIELD", short: "MINES", hotkey: "7",
     cost: 90, hp: 30, range: 4.6, rof: 0, dmg: 75, pen: 999, splash: 4.6, splashDmg: 75,
-    projSpeed: 0, lob: 0, ammo: 3, resupplyCost: 0, antiAir: false, structure: true, traverse: 0,
+    projSpeed: 0, lob: 0, ammo: 3, antiAir: false, structure: true, traverse: 0, minRange: 0,
     upgrades: [],
   },
 };
@@ -191,5 +201,4 @@ export const WAVES: WaveDef[] = [
 export const SELL_RATIO = 0.6;
 export const CP_MAX = 5;
 export const ARTY_COST = 3;
-export const RESUPPLY_ALL_COST = 2;
 export const BASE_MAX = 20;
